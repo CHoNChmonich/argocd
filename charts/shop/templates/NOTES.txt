@@ -1,0 +1,21 @@
+Релиз {{ .Release.Name }} (chart {{ .Chart.Name }}-{{ .Chart.Version }}, app {{ .Chart.AppVersion }}) в namespace {{ .Release.Namespace }}.
+
+Сервисы: {{ keys .Values.services | sortAlpha | join ", " }}
+Образы:  {{ .Values.image.registry }}/{{ .Values.image.repository }}/<service>:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{- if .Values.ingress.enabled }}
+
+Доступ через Ingress ({{ .Values.ingress.className }}):
+{{- range $name, $_ := .Values.services }}
+  http://{{ $name }}.{{ $.Values.ingress.domain }}
+{{- end }}
+{{- range .Values.ingress.extraHosts }}
+  http://{{ .host }}.{{ $.Values.ingress.domain }}
+{{- end }}
+{{- if .Values.ingress.pathBased.enabled }}
+  http://{{ .Values.ingress.domain }}/api/<service>/...
+{{- end }}
+{{- end }}
+
+Проверка:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+  kubectl -n {{ .Release.Namespace }} get deploy,hpa,pdb,vpa -l app.kubernetes.io/instance={{ .Release.Name }}

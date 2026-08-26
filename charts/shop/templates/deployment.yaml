@@ -1,0 +1,127 @@
+{{- /*
+Один шаблон на все сервисы: range по .Values.services.
+Внутри range "." — элемент цикла, поэтому корень сохраняем в $root.
+*/ -}}
+{{- $root := . }}
+{{- $d := .Values.dependencies }}
+{{- range $name, $_ := .Values.services }}
+{{- $svc := include "shop.serviceValues" (dict "root" $root "name" $name) | fromYaml }}
+{{- $ctx := dict "root" $root "name" $name }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+# приложение к API k8s не обращается — токен в под не монтируем
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+spec:
+  {{- if not $svc.autoscaling.enabled }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shop.labels" $root | nindent 8 }}
+        {{- include "shop.selectorLabels" $ctx | nindent 8 }}
+      annotations:
+        # изменился ConfigMap -> изменилась аннотация -> Deployment перекатывает поды
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap.yaml") $root | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds }}
+      {{- if $svc.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ $svc.topologySpread.whenUnsatisfiable }}
+          nodeTaintsPolicy: Honor
+          labelSelector:
+            matchLabels:
+              {{- include "shop.selectorLabels" $ctx | nindent 14 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $root.Values.securityContext.runAsUser }}
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: {{ $name }}
+          image: {{ include "shop.image" $ctx }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          ports:
+            - { containerPort: {{ $svc.port }}, name: http }
+          envFrom:
+            - configMapRef: { name: {{ $root.Release.Name }}-config }
+          env:
+            - { name: SERVICE_NAME, value: {{ $name | quote }} }
+            - { name: APP_VERSION, value: {{ $root.Chart.AppVersion | quote }} }
+            - { name: PORT, value: {{ $svc.port | quote }} }
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            # пароли — из Secret'ов, созданных чартами зависимостей
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $d.postgresql.existingSecret }}, key: {{ $d.postgresql.secretKey }} } }
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $d.redis.existingSecret }}, key: {{ $d.redis.secretKey }} } }
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $d.rabbitmq.existingSecret }}, key: {{ $d.rabbitmq.secretKey }} } }
+            {{- with $svc.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet: { path: {{ $svc.probes.startup.path }}, port: http }
+            periodSeconds: {{ $svc.probes.startup.periodSeconds }}
+            failureThreshold: {{ $svc.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet: { path: {{ $svc.probes.readiness.path }}, port: http }
+            periodSeconds: {{ $svc.probes.readiness.periodSeconds }}
+            failureThreshold: {{ $svc.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet: { path: {{ $svc.probes.liveness.path }}, port: http }
+            periodSeconds: {{ $svc.probes.liveness.periodSeconds }}
+            failureThreshold: {{ $svc.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - { name: http, port: {{ $svc.port }}, targetPort: http }
+{{- end }}

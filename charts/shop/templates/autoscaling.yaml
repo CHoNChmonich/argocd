@@ -1,0 +1,83 @@
+{{- $root := . }}
+{{- range $name, $_ := .Values.services }}
+{{- $svc := include "shop.serviceValues" (dict "root" $root "name" $name) | fromYaml }}
+{{- $ctx := dict "root" $root "name" $name }}
+{{- if $svc.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $svc.autoscaling.minReplicas }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ $svc.autoscaling.targetCPUUtilization }} }
+    {{- with (dig "metrics" "memoryUtilization" nil $svc.autoscaling) }}
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: {{ . }} }
+    {{- end }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{ type: Percent, value: 100, periodSeconds: 15 }]
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies: [{ type: Pods, value: 1, periodSeconds: 30 }]
+{{- end }}
+{{- if $svc.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+spec:
+  {{- if $svc.pdb.minAvailable }}
+  minAvailable: {{ $svc.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $svc.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- if and $svc.vpa.enabled ($root.Capabilities.APIVersions.Has "autoscaling.k8s.io/v1") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "shop.labels" $root | nindent 4 }}
+    {{- include "shop.selectorLabels" $ctx | nindent 4 }}
+spec:
+  targetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  updatePolicy:
+    updateMode: {{ $svc.vpa.updateMode | quote }}
+  {{- if or $svc.vpa.minAllowed $svc.vpa.maxAllowed }}
+  resourcePolicy:
+    containerPolicies:
+      - containerName: {{ $name }}
+        {{- with $svc.vpa.minAllowed }}
+        minAllowed: {{ toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with $svc.vpa.maxAllowed }}
+        maxAllowed: {{ toYaml . | nindent 10 }}
+        {{- end }}
+        controlledResources: ["cpu", "memory"]
+        controlledValues: RequestsAndLimits
+  {{- end }}
+{{- end }}
+{{- end }}

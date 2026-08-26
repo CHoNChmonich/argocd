@@ -1,0 +1,49 @@
+{{- /* CRD Prometheus Operator: рендерим только если они есть в кластере (helm template без кластера — не рендерит) */ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-services
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ include "shop.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-alerts
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+spec:
+  # правила лежат в files/ — .Files.Get не прогоняет их через шаблонизатор,
+  # поэтому {{ "{{ $labels.x }}" }} внутри не нужно экранировать
+  {{- .Files.Get "files/prometheus-rules.yaml" | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- if .Values.monitoring.dashboard.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+    grafana_dashboard: "1"      # sidecar Grafana подхватит
+data:
+  shop.json: |-
+    {{- .Files.Get "files/dashboards/shop.json" | nindent 4 }}
+{{- end }}

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: shop
+description: Мини-магазин из трёх микросервисов (orders, inventory, notifier) — Deployment/Service/Ingress/HPA/VPA/PDB и мониторинг
+type: application
+# version — версия ЧАРТА (semver), меняется при любом изменении шаблонов/values.
+# appVersion — версия ПРИЛОЖЕНИЯ, информационная; по умолчанию используется как тег образа.
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [fastapi, microservices, learning]
+maintainers:
+  - name: Artem
+# Зависимости (postgresql/redis/rabbitmq/jaeger) сейчас ставятся отдельными релизами (cluster/deps.sh).
+# Их можно объявить здесь как subchart'ы с condition — тогда helm install shop поднимет всё разом:
+# dependencies:
+#   - name: postgresql
+#     version: 16.7.27
+#     repository: oci://registry-1.docker.io/bitnamicharts
+#     condition: postgresql.enabled

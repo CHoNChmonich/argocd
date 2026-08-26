@@ -1,0 +1,22 @@
+{{- $d := .Values.dependencies }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  OTEL_ENABLED: {{ .Values.config.otelEnabled | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  CACHE_TTL_SECONDS: {{ .Values.config.cacheTtlSeconds | quote }}
+  # подключения по частям; пароли — через secretKeyRef в deployment.yaml
+  DB_HOST: {{ $d.postgresql.host | quote }}
+  DB_PORT: {{ $d.postgresql.port | quote }}
+  DB_USER: {{ $d.postgresql.user | quote }}
+  DB_NAME: {{ $d.postgresql.database | quote }}
+  REDIS_HOST: {{ $d.redis.host | quote }}
+  REDIS_PORT: {{ $d.redis.port | quote }}
+  RABBITMQ_HOST: {{ $d.rabbitmq.host | quote }}
+  RABBITMQ_PORT: {{ $d.rabbitmq.port | quote }}
+  RABBITMQ_USER: {{ $d.rabbitmq.user | quote }}

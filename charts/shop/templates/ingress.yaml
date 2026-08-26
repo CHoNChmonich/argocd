@@ -1,0 +1,56 @@
+{{- if .Values.ingress.enabled }}
+{{- $ing := .Values.ingress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-hosts
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+  {{- with $ing.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ $ing.className }}
+  rules:
+    {{- range $name, $_ := .Values.services }}
+    - host: {{ printf "%s.%s" $name $ing.domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ $name }}, port: { name: http } } }
+    {{- end }}
+    {{- range $ing.extraHosts }}
+    - host: {{ printf "%s.%s" .host $ing.domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ .service }}, port: { name: {{ .port }} } } }
+    {{- end }}
+{{- if $ing.pathBased.enabled }}
+---
+# path-based: <domain>/api/<service>/<path> -> сервис получает /<path>
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-paths
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: {{ $ing.className }}
+  rules:
+    - host: {{ $ing.domain }}
+      http:
+        paths:
+          {{- range $name, $_ := .Values.services }}
+          - path: /api/{{ $name }}(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend: { service: { name: {{ $name }}, port: { name: http } } }
+          {{- end }}
+{{- end }}
+{{- end }}

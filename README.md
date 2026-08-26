@@ -1,8 +1,9 @@
 # k8s pet-project: мини-магазин из трёх микросервисов
 
 Учебный проект для отработки Kubernetes (Ingress, LoadBalancer, HPA, VPA, PDB, …) и Helm.
-Этап 1 — само приложение и локальный стенд на docker-compose. Этап 2 — сырые k8s-манифесты (`manifests/`,
-теперь только как учебный справочник). Этап 3 — приложение как свой Helm-чарт `charts/shop` (актуальный способ деплоя).
+Этап 1 — само приложение и локальный стенд на docker-compose. Этап 2 — сырые k8s-манифесты (удалены после переезда
+на чарт; смотреть в git: `git show 59867c4:manifests/21-orders.yaml`, `git ls-tree 59867c4 manifests/`).
+Этап 3 — приложение как свой Helm-чарт `charts/shop`.
 
 ## Архитектура
 
@@ -65,8 +66,7 @@ UI: Jaeger http://localhost:16686 · Prometheus http://localhost:9090 · RabbitM
 
 ```
 services/            приложение: common/, orders/, inventory/, notifier/, Dockerfile
-charts/shop/         Helm-чарт приложения (этап 3) — то, что реально деплоится
-manifests/           сырые k8s-манифесты приложения (этап 2) — справочно, НЕ применяются
+charts/shop/         Helm-чарт приложения (этап 3)
 infra/charts/        внешние Helm-чарты (vendored), infra/values/ — наши values к ним
 cluster/             registry.sh, bootstrap.sh (мониторинг, ingress, metrics-server, VPA), deps.sh (postgres, redis, rabbitmq, jaeger), namespace-shop.yaml
 deploy/local/        конфиги для docker-compose (prometheus)
@@ -129,17 +129,11 @@ Docker Desktop пробрасывает на `localhost`, NodePort — нет.
 При старте приложения падают, пока RabbitMQ/Postgres не готовы, и k8s их перезапускает (RESTARTS 1-2) —
 это штатно: crash -> restart с backoff, readiness держит под вне трафика до готовности зависимостей.
 
-| Файл | Что демонстрирует |
-|---|---|
-| `cluster/namespace-shop.yaml` | Namespace + Pod Security Standards (`restricted`) — платформенный объект, применяется в `deps.sh`/`deploy.sh` |
-| `01-config.yaml` | ConfigMap и Secret, подключаются через `envFrom` |
-| `20-inventory.yaml`, `21-*`, `22-*` | Deployment: RollingUpdate, startup/readiness/liveness-пробы, requests/limits, securityContext, downward API; Service ClusterIP |
-| `30-ingress.yaml` | Ingress host-based (`orders.shop.localtest.me`) и path-based с rewrite (`shop.localtest.me/api/orders/...`) |
-| `40-hpa.yaml` | HPA orders/inventory по CPU (2..6 реплик), `behavior` для скорости scale-up/down |
-| `41-pdb.yaml` | PDB orders/inventory (`maxUnavailable: 1`), notifier (`minAvailable: 1`) |
-| `42-vpa.yaml` | VPA: orders/inventory `Off` (только рекомендации — конфликт с HPA по CPU), notifier `Initial` |
-| `50-monitoring.yaml` | ServiceMonitor на сервисы, PrometheusRule (recording + 5 алертов), ConfigMap с дашбордом Grafana (метрики + панели логов из Loki) |
-| `examples/service-types.yaml` | справочно, не применяется: LoadBalancer, NodePort, Headless для сравнения |
+Что демонстрировали сырые манифесты (теперь всё это — шаблоны `charts/shop/templates/`):
+Namespace + Pod Security `restricted` (остался в `cluster/namespace-shop.yaml`); ConfigMap/Secret через `envFrom`;
+Deployment с RollingUpdate, startup/readiness/liveness-пробами, requests/limits, securityContext, downward API;
+Service ClusterIP; Ingress host- и path-based с rewrite; HPA/PDB/VPA; ServiceMonitor/PrometheusRule/дашборд.
+Справочник по типам Service (LoadBalancer/NodePort/Headless) — `git show 59867c4:manifests/examples/service-types.yaml`.
 
 Проверка:
 

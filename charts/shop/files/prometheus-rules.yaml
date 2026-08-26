@@ -1,0 +1,47 @@
+# Правила Prometheus для приложения. Файл подключается через .Files.Get — Helm его не шаблонизирует.
+groups:
+  - name: shop.rules
+    rules:
+      # recording rule: заранее посчитанная метрика, чтобы дашборды/алерты не считали rate каждый раз
+      - record: shop:orders_created:rate5m
+        expr: sum by (outcome) (rate(orders_created_total[5m]))
+
+      - alert: ShopHighOutOfStockRatio
+        expr: |
+          sum(rate(orders_created_total{outcome="out_of_stock"}[5m]))
+            / sum(rate(orders_created_total[5m])) > 0.3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Более 30% заказов отклоняются из-за нехватки товара"
+
+      - alert: ShopHttp5xx
+        expr: |
+          sum by (handler) (rate(http_requests_total{namespace="shop", status=~"5.."}[5m])) > 0.1
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx на {{ $labels.handler }}: {{ $value | printf \"%.2f\" }} rps"
+
+      - alert: ShopPodNotReady
+        expr: |
+          kube_deployment_status_replicas_available{namespace="shop"}
+            < kube_deployment_spec_replicas{namespace="shop"}
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Deployment {{ $labels.deployment }}: доступных реплик меньше желаемого"
+
+      - alert: ShopPdbNoDisruptionsAllowed
+        expr: kube_poddisruptionbudget_status_pod_disruptions_allowed{namespace="shop"} == 0
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: "PDB {{ $labels.poddisruptionbudget }} не допускает эвакуацию — drain ноды застрянет"
+
+      - alert: RabbitMQQueueBacklog
+        expr: rabbitmq_queue_messages{namespace="shop"} > 100
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Очередь {{ $labels.queue }}: {{ $value }} сообщений — notifier не успевает"

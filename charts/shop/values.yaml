@@ -1,0 +1,119 @@
+# Значения по умолчанию чарта shop. Переопределяются: -f values-<env>.yaml или --set.
+
+image:
+  registry: localhost:5001
+  repository: shop            # образ = <registry>/<repository>/<service>:<tag>
+  tag: ""                     # пусто -> .Chart.appVersion; в лабе переопределяем на "dev"
+  pullPolicy: IfNotPresent
+
+# Общая несекретная конфигурация -> ConfigMap <release>-config
+config:
+  logLevel: INFO
+  otelEnabled: true
+  otelEndpoint: http://jaeger-collector:4317
+  cacheTtlSeconds: 60
+
+# Подключения к зависимостям. Хост/порт/пользователь -> ConfigMap; пароль берётся из Secret,
+# который создал helm-чарт самой зависимости (existingSecret/secretKey) — пароль нигде не дублируется.
+dependencies:
+  postgresql:
+    host: postgresql
+    port: 5432
+    user: app
+    database: app
+    existingSecret: postgresql
+    secretKey: password
+  redis:
+    host: redis-master
+    port: 6379
+    existingSecret: redis
+    secretKey: redis-password
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    user: app
+    existingSecret: rabbitmq
+    secretKey: rabbitmq-password
+
+# Значения, общие для всех сервисов; каждый сервис может переопределить любое поле.
+serviceDefaults:
+  port: 8000
+  replicas: 2                     # используется, только если autoscaling.enabled=false
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilization: 50
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  vpa:
+    enabled: true
+    updateMode: "Off"
+  probes:
+    startup:   { path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+    readiness: { path: /readyz,  periodSeconds: 5, failureThreshold: 3 }
+    liveness:  { path: /healthz, periodSeconds: 10, failureThreshold: 3 }
+  topologySpread:
+    enabled: true
+    whenUnsatisfiable: ScheduleAnyway
+  terminationGracePeriodSeconds: 30
+  extraEnv: []                    # список {name, value}
+
+# Сервисы приложения. Ключ = имя (Deployment, Service, образ <repository>/<key>).
+services:
+  orders:
+    autoscaling:
+      enabled: true
+    extraEnv:
+      - name: INVENTORY_URL
+        value: http://inventory:8000
+  inventory:
+    autoscaling:
+      enabled: true
+      metrics:
+        memoryUtilization: 80     # вторая метрика HPA (макс. из желаемых реплик)
+  notifier:
+    replicas: 2
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 192Mi }
+    pdb:
+      minAvailable: 1
+      maxUnavailable: null
+    vpa:
+      updateMode: Initial
+      minAllowed: { cpu: 20m, memory: 64Mi }
+      maxAllowed: { cpu: 500m, memory: 512Mi }
+
+# Ingress: host-based <service>.<domain> для каждого сервиса + дополнительные хосты + path-based
+ingress:
+  enabled: true
+  className: nginx
+  domain: shop.localtest.me
+  annotations: {}
+  extraHosts:                     # UI зависимостей
+    - host: jaeger
+      service: jaeger-query
+      port: http-query
+    - host: rabbitmq
+      service: rabbitmq
+      port: http-stats
+  pathBased:
+    enabled: true                 # <domain>/api/<service>/... с rewrite
+
+# Мониторинг (CRD Prometheus Operator должны существовать в кластере)
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+  prometheusRule:
+    enabled: true
+  dashboard:
+    enabled: true
+
+securityContext:
+  runAsUser: 10001

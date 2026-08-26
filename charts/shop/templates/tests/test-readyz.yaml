@@ -1,0 +1,29 @@
+# helm test <release>: под с hook test запускается по требованию и должен завершиться с кодом 0.
+# Проверяем readiness каждого сервиса через его Service — зависимости доступны, приложение отвечает.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-readyz
+  labels:
+    {{- include "shop.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }
+      command: ["sh", "-ec"]
+      args:
+        - |
+          {{- range $name, $_ := .Values.services }}
+          echo "== {{ $name }}"; curl -sf http://{{ $name }}:8000/readyz; echo
+          {{- end }}
