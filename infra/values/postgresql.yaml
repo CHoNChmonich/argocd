@@ -1,0 +1,46 @@
+# bitnami/postgresql 16.7.27 (app 17.6.0). Полный список: infra/charts/postgresql/values.yaml
+#
+# Bitnami с 2025 публикует версионные образы только в платный bitnamisecure; в docker.io/bitnami — лишь :latest.
+# Пиним замороженный bitnamilegacy (без security-обновлений — только для учёбы).
+global:
+  security:
+    allowInsecureImages: true   # чарт отказывается стартовать с "чужим" repository без этого флага
+
+image:
+  repository: bitnamilegacy/postgresql
+  tag: 17.6.0-debian-12-r4
+
+# Пользователь/БД приложения. Чарт создаст Secret postgresql с ключами password / postgres-password.
+auth:
+  username: app
+  password: app        # учебное значение; в проде — existingSecret
+  database: app
+
+architecture: standalone   # один primary без реплик
+
+# ---- ХОСТ и ПОРТ, на которые ходит приложение (см. manifests/01-config.yaml) ----
+# Имя Service = fullnameOverride (иначе чарт вывел бы его из имени релиза).
+# DNS: postgresql.shop.svc.cluster.local, внутри namespace — просто "postgresql".
+fullnameOverride: postgresql
+
+primary:
+  service:
+    type: ClusterIP
+    ports:
+      postgresql: 5432   # порт Service'а "postgresql" -> DATABASE_URL ...@postgresql:5432
+  persistence:
+    enabled: true
+    size: 1Gi            # PVC через default StorageClass (в Docker Desktop kind — local-path)
+  resourcesPreset: none
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# postgres-exporter как sidecar + ServiceMonitor для Prometheus Operator (CRD должны существовать)
+metrics:
+  enabled: true
+  image:
+    repository: bitnamilegacy/postgres-exporter
+    tag: 0.17.1-debian-12-r16
+  serviceMonitor:
+    enabled: true

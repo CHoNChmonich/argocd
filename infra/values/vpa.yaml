@@ -1,0 +1,17 @@
+# fairwinds-stable/vpa 5.0.0 (Vertical Pod Autoscaler 1.7.1). Полный список: infra/charts/vpa/values.yaml
+#
+# VPA — три компонента:
+#   recommender  — смотрит историю потребления (через metrics-server) и считает рекомендуемые requests
+#   updater      — в режиме Auto/Recreate эвиктит поды, чьи requests далеки от рекомендации
+#   admission-controller — webhook: при создании пода подставляет рекомендованные requests (Initial/Auto)
+recommender:
+  enabled: true
+  extraArgs:
+    # по умолчанию рекомендация стабилизируется сутками; для лабы ускоряем накопление истории
+    recommender-interval: 30s
+    memory-saver: true
+updater:
+  enabled: true
+admissionController:
+  enabled: true
+  generateCertificate: true   # самоподписанный cert для webhook (в проде — cert-manager)

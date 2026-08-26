@@ -1,0 +1,45 @@
+# bitnami/rabbitmq 16.0.14 (app 4.1.3). Полный список: infra/charts/rabbitmq/values.yaml
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  repository: bitnamilegacy/rabbitmq
+  tag: 4.1.3-debian-12-r1
+
+auth:
+  username: app
+  password: app
+  # Erlang cookie — общий секрет нод кластера RabbitMQ. Чарт генерирует случайный,
+  # но при helm upgrade требует тот же — фиксируем явно.
+  erlangCookie: shop-learning-cookie-not-for-prod
+
+replicaCount: 1
+
+# ---- ХОСТ и ПОРТЫ ----
+fullnameOverride: rabbitmq   # Service "rabbitmq" (+ headless "rabbitmq-headless")
+service:
+  type: ClusterIP
+  ports:
+    amqp: 5672       # RABBITMQ_URL amqp://app:app@rabbitmq:5672/
+    manager: 15672   # management UI -> Ingress rabbitmq.shop.localtest.me (порт по имени "http-stats")
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+resourcesPreset: none
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 512Mi }
+
+# Плагин management (UI :15672) включён по умолчанию; prometheus-плагин — тоже (порт 9419).
+metrics:
+  enabled: true          # встроенный плагин rabbitmq_prometheus (:9419), отдельный образ не нужен
+  serviceMonitor:
+    enabled: true
+
+# По умолчанию плагин отдаёт только агрегаты (rabbitmq_queue_messages без метки queue).
+# Per-object метрики нужны для алертов/дашбордов по конкретной очереди и для KEDA.
+extraConfiguration: |-
+  prometheus.return_per_object_metrics = true

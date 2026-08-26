@@ -1,0 +1,108 @@
+# prometheus-community/kube-prometheus-stack 88.5.4. Полный список: infra/charts/kube-prometheus-stack/values.yaml
+#
+# Что ставит чарт:
+#   prometheus-operator  — контроллер: читает CRD Prometheus/ServiceMonitor/PodMonitor/PrometheusRule/Alertmanager
+#                          и генерирует из них конфиг Prometheus (scrape-таргеты, правила)
+#   prometheus           — StatefulSet, сам сборщик + хранилище временных рядов
+#   alertmanager         — маршрутизация алертов (email/slack/webhook), группировка, silence
+#   grafana              — дашборды; sidecar подхватывает ConfigMap'ы с label grafana_dashboard
+#   kube-state-metrics   — состояние объектов k8s как метрики (реплики, рестарты, фазы подов...)
+#   node-exporter        — DaemonSet, метрики ОС нод (CPU, диск, сеть)
+#   + ServiceMonitor'ы на kubelet/cAdvisor/apiserver/coredns и готовые дашборды и алерты по кластеру
+
+fullnameOverride: kps   # иначе имена вида kube-prometheus-stack-prometheus — длинно
+
+# ---- Prometheus ----
+prometheus:
+  prometheusSpec:
+    # По умолчанию Prometheus видит только ServiceMonitor/PodMonitor/PrometheusRule с label release=<релиз>.
+    # Отключаем — чтобы подхватывались мониторы из чартов зависимостей и наших манифестов в любом namespace.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    retention: 3d
+    scrapeInterval: 15s
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { memory: 1Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 5Gi
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [prometheus.shop.localtest.me]
+
+# ---- Alertmanager ----
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 128Mi }
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [alertmanager.shop.localtest.me]
+
+# ---- Grafana ----
+grafana:
+  adminPassword: admin   # учебное; в проде — existingSecret / SSO
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [grafana.shop.localtest.me]
+  # дополнительные datasource'ы (Prometheus и Alertmanager чарт добавляет сам)
+  additionalDataSources:
+    - name: Jaeger
+      type: jaeger
+      uid: jaeger
+      url: http://jaeger-query.shop.svc.cluster.local:16686
+      access: proxy
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      access: proxy
+      # Loki 3.6 при auth_enabled=false не подставляет фейковый tenant на новые /drilldown*-эндпоинты
+      # (401 "no org id") -> Logs Drilldown в Grafana 13 показывает пустоту. Шлём tenant явно.
+      secureJsonData:
+        httpHeaderValue1: shop
+      jsonData:
+        httpHeaderName1: X-Scope-OrgID
+        # клик по trace_id в строке лога -> открыть трейс в Jaeger
+        derivedFields:
+          - name: trace_id
+            datasourceUid: jaeger
+            matcherRegex: '"trace_id":\s*"(\w+)"'
+            url: "$${__value.raw}"
+            urlDisplayLabel: "Trace in Jaeger"
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL   # брать ConfigMap'ы с label grafana_dashboard=1 из всех namespace (наш — в shop)
+    datasources:
+      enabled: true          # Prometheus и Alertmanager автоматически как datasource
+  # Grafana с ~30 дашбордами стека держит ~250Mi в покое и пикует при открытии дашбордов/перезагрузке
+  # provisioning; с лимитами 256Mi и 512Mi ловили OOMKilled (exit 137) -> 503 из ingress на время рестарта
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }
+
+# ---- компоненты control-plane, недоступные в kind ----
+# В kind kube-controller-manager/scheduler/etcd/kube-proxy слушают метрики на 127.0.0.1 ноды —
+# Prometheus до них не достучится, таргеты были бы вечно DOWN и сыпали алертами. Выключаем.
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeEtcd: { enabled: false }
+kubeProxy: { enabled: false }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }

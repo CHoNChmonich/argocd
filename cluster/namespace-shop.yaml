@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels:
+    app.kubernetes.io/part-of: shop
+    # Pod Security Standards: в этом namespace поды обязаны быть "restricted"
+    # (non-root, без капабилити, без privilege escalation). Проверит наши securityContext.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

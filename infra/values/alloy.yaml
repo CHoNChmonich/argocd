@@ -1,0 +1,106 @@
+# grafana/alloy 1.12.0 (Alloy 1.19). Полный список: infra/charts/alloy/values.yaml
+#
+# Alloy — универсальный коллектор Grafana (замена Promtail, совместим с OpenTelemetry).
+# Здесь — DaemonSet, который собирает логи ВСЕХ подов ноды и шлёт в Loki.
+# Конфиг на языке Alloy (бывший River): компоненты соединяются через forward_to.
+controller:
+  type: daemonset
+  volumes:
+    extra:
+      - name: positions
+        hostPath:
+          path: /var/lib/alloy-positions
+          type: DirectoryOrCreate
+  # собирать логи и с control-plane (у него taint NoSchedule)
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+alloy:
+  configMap:
+    content: |
+      // 1. Найти поды через API k8s (только на своей ноде — иначе каждый агент собирал бы всё)
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME_NODE")
+        }
+      }
+
+      // 2. Превратить служебные __meta_* метки в метки Loki. Меток должно быть МАЛО и они должны быть
+      //    низкой кардинальности: каждая уникальная комбинация = отдельный stream. Никаких trace_id в метки!
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+        // не собирать логи самого Alloy — иначе петля: строка о доставке лога порождает новый лог
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          regex         = "alloy"
+          action        = "drop"
+        }
+      }
+
+      // 3. Читать логи через kubelet API (как kubectl logs) — не нужен hostPath /var/log/pods и root
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      // 4. Обработка: у наших сервисов JSON — вытащить level в structured metadata (не в метку!),
+      //    чтобы фильтровать | level="ERROR" без роста числа streams
+      loki.process "pods" {
+        stage.json {
+          expressions = { level = "level" }
+        }
+        stage.structured_metadata {
+          values = { level = "" }
+        }
+        forward_to = [loki.write.loki.receiver]
+      }
+
+      // 5. Отправка в Loki через gateway
+      loki.write "loki" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+      }
+
+  # Позиции чтения (docket, что уже отправлено) — на диске ноды, а не в emptyDir: иначе после рестарта
+  # агент перечитывает логи с начала, Loki отвергает строки старше часа (too_far_behind), в логе — 400.
+  storagePath: /var/lib/alloy
+  mounts:
+    extra:
+      - name: positions
+        mountPath: /var/lib/alloy
+
+  # имя ноды в env — для фильтра "только своя нода"
+  extraEnv:
+    - name: HOSTNAME_NODE
+      valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# RBAC чарт создаёт сам: читать pods, nodes, nodes/proxy (для kubelet API), namespaces

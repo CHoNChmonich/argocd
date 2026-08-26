@@ -1,0 +1,4 @@
+# values для чарта metrics-server/metrics-server
+args:
+  # у kubelet'ов kind самоподписанные сертификаты без SAN — в проде так не делают
+  - --kubelet-insecure-tls

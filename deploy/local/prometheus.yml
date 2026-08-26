@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: services
+    static_configs:
+      - targets: ["orders:8000"]
+        labels: { service: orders }
+      - targets: ["inventory:8000"]
+        labels: { service: inventory }
+      - targets: ["notifier:8000"]
+        labels: { service: notifier }

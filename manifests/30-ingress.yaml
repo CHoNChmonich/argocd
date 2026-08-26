@@ -1,0 +1,70 @@
+# Ingress — L7-маршрутизация HTTP через ingress-nginx (ставится в cluster/bootstrap.sh).
+# Домен *.localtest.me публично резолвится в 127.0.0.1 — hosts-файл править не нужно.
+#
+# Вариант 1: host-based — каждому сервису свой хост.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop-hosts
+  namespace: shop
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: orders.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: orders, port: { name: http } } }
+    - host: inventory.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: inventory, port: { name: http } } }
+    - host: notifier.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: notifier, port: { name: http } } }
+    - host: jaeger.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: jaeger-query, port: { name: http-query } } }
+    - host: rabbitmq.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: rabbitmq, port: { name: http-stats } } }
+---
+# Вариант 2: path-based — один хост, префикс пути определяет сервис.
+# Префикс срезается rewrite'ом: /api/orders/orders/1 -> в под уходит /orders/1.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop-paths
+  namespace: shop
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.localtest.me
+      http:
+        paths:
+          - path: /api/orders(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend: { service: { name: orders, port: { name: http } } }
+          - path: /api/inventory(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend: { service: { name: inventory, port: { name: http } } }
+          - path: /api/notifier(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend: { service: { name: notifier, port: { name: http } } }

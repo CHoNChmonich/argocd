@@ -1,0 +1,39 @@
+# bitnami/redis 20.13.4 (app 7.4.3). Полный список: infra/charts/redis/values.yaml
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  repository: bitnamilegacy/redis
+  tag: 7.4.3-debian-12-r0
+
+architecture: standalone   # только master (по умолчанию replication: master + 3 replicas)
+
+# ---- ХОСТ и ПОРТ ----
+# Чарт к fullname добавляет суффикс компонента: Service будет "redis-master" (+ headless "redis-headless").
+fullnameOverride: redis
+
+auth:
+  enabled: true
+  password: app            # Secret redis, ключ redis-password
+
+master:
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379        # порт Service'а "redis-master" -> REDIS_URL redis://:app@redis-master:6379
+  persistence:
+    enabled: true
+    size: 1Gi
+  resourcesPreset: none
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+metrics:
+  enabled: true
+  image:
+    repository: bitnamilegacy/redis-exporter
+    tag: 1.76.0-debian-12-r0
+  serviceMonitor:
+    enabled: true

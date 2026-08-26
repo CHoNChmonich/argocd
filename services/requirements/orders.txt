@@ -1,0 +1,3 @@
+-r common.txt
+-r db.txt
+-r mq.txt

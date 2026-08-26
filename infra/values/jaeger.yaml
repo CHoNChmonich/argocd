@@ -1,0 +1,35 @@
+# jaegertracing/jaeger 3.4.1 (app 1.53.0). Полный список: infra/charts/jaeger/values.yaml
+# Режим all-in-one: collector + query + in-memory storage в одном поде. Для лабы достаточно;
+# в проде — отдельные collector/query + Elasticsearch/Cassandra или Grafana Tempo.
+
+# ---- ХОСТ и ПОРТЫ ----
+# Чарт создаёт Service'ы <fullname>-collector, <fullname>-query, <fullname>-agent.
+# Порты в all-in-one зашиты в шаблонах чарта и через values НЕ меняются:
+#   jaeger-collector:4317 (OTLP gRPC) -> OTEL_EXPORTER_OTLP_ENDPOINT, 4318 (OTLP HTTP)
+#   jaeger-query:16686 (UI)           -> Ingress jaeger.shop.localtest.me (порт по имени "http-query")
+fullnameOverride: jaeger
+
+provisionDataStore:
+  cassandra: false      # чарт по умолчанию тянет subchart Cassandra — выключаем
+
+storage:
+  type: memory
+
+allInOne:
+  enabled: true
+  # Pod Security "restricted" в namespace shop: чарт по умолчанию securityContext не задаёт
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile: { type: RuntimeDefault }
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities: { drop: ["ALL"] }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# отдельные компоненты не нужны — всё в all-in-one
+agent: { enabled: false }
+collector: { enabled: false }
+query: { enabled: false }

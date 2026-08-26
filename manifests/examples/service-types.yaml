@@ -1,0 +1,49 @@
+# СПРАВОЧНО, в deploy.sh не входит: kubectl apply -f manifests/examples/service-types.yaml
+#
+# LoadBalancer: просит у окружения внешний L4-балансировщик. В облаке — публичный IP,
+# в чистом kind — нужен MetalLB. Docker Desktop (kind-провизионер) выдаёт IP из сети kind
+# (172.20.x.x, с хоста недоступен) и дополнительно пробрасывает порт на localhost.
+# Ingress-controller сам опубликован именно таким Service'ом (см. namespace ingress-nginx).
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-lb
+  namespace: shop
+  labels: { app.kubernetes.io/name: orders }
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: orders
+  ports:
+    - { name: http, port: 8081, targetPort: http }   # http://localhost:8081
+---
+# NodePort: открывает порт из диапазона 30000-32767 на КАЖДОЙ ноде. LoadBalancer построен поверх него.
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-nodeport
+  namespace: shop
+  labels: { app.kubernetes.io/name: inventory }
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: inventory
+  ports:
+    # В kind порты нод на хост НЕ пробрасываются: с хоста недоступно, изнутри ноды —
+    #   docker exec desktop-worker curl http://localhost:30082/info
+    - { name: http, port: 8000, targetPort: http, nodePort: 30082 }
+---
+# Headless (clusterIP: None): без виртуального IP, DNS отдаёт IP всех подов напрямую.
+# Нужен StatefulSet'ам и клиентам с собственной балансировкой (gRPC, Kafka).
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-headless
+  namespace: shop
+  labels: { app.kubernetes.io/name: orders }
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: orders
+  ports:
+    - { name: http, port: 8000, targetPort: http }

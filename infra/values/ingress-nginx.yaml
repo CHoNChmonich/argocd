@@ -1,0 +1,40 @@
+# values для чарта ingress-nginx/ingress-nginx (переопределения поверх values.yaml чарта:
+#   helm show values ./infra/charts/ingress-nginx)
+controller:
+  service:
+    type: LoadBalancer   # Docker Desktop пробросит 80/443 на localhost
+  metrics:
+    enabled: true        # /metrics контроллера (:10254)
+    serviceMonitor:
+      enabled: true      # -> ServiceMonitor, Prometheus Operator начнёт scrape
+
+  # ---- трейсинг: nginx создаёт корневой спан и пробрасывает W3C traceparent в под ----
+  # Модуль OpenTelemetry встроен в образ контроллера (с 1.12), включается ключами ConfigMap.
+  # Включаем глобально; можно и per-Ingress аннотацией nginx.ingress.kubernetes.io/enable-opentelemetry.
+  config:
+    enable-opentelemetry: "true"
+    otlp-collector-host: jaeger-collector.shop.svc.cluster.local   # OTLP gRPC, тот же коллектор, что у приложения
+    otlp-collector-port: "4317"
+    otel-service-name: ingress-nginx
+    otel-sampler: AlwaysOn          # в проде — TraceIdRatioBased + otel-sampler-ratio
+    otel-sampler-parent-based: "true"
+    opentelemetry-trust-incoming-span: "true"   # продолжать трейс, если клиент прислал traceparent
+    # имя корневого спана; по умолчанию пустое. $uri — сырой путь (высокая кардинальность, ок для лабы)
+    opentelemetry-operation-name: "HTTP $request_method $host $uri"
+
+  # ---- отказоустойчивость контроллера: это единственная точка входа, падать ему нельзя ----
+  replicaCount: 2
+  minAvailable: 1        # -> PodDisruptionBudget: при drain ноды хотя бы 1 под остаётся
+  # разложить реплики по разным нодам (maxSkew 1 = разница между нодами не больше одного пода)
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      # без этого control-plane (taint NoSchedule) считается доменом с 0 подов -> skew 2 -> Pending
+      nodeTaintsPolicy: Honor
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+          app.kubernetes.io/component: controller
+  # HPA для контроллера чарт тоже умеет (controller.autoscaling.enabled) — пока не включаем,
+  # 2 реплики нужны ради доступности, а не нагрузки.

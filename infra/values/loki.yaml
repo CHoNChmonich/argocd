@@ -1,0 +1,66 @@
+# grafana/loki 7.3.0 (Loki 3.6). Полный список: infra/charts/loki/values.yaml
+#
+# Loki хранит логи как сжатые чанки + маленький индекс по МЕТКАМ (namespace, pod, container...),
+# текст не индексируется — поэтому дёшев. Поиск по тексту = grep по чанкам за выбранный диапазон.
+#
+# Режимы чарта: Distributed (микросервисы), SimpleScalable (read/write/backend), SingleBinary (всё в одном).
+# Для лабы — SingleBinary с локальным диском.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false            # без multi-tenancy (иначе нужен заголовок X-Scope-OrgID)
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem             # в проде — S3/GCS/Azure Blob
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index: { prefix: loki_index_, period: 24h }
+  limits_config:
+    retention_period: 72h        # 3 дня, как у Prometheus
+    allow_structured_metadata: true
+  compactor:
+    retention_enabled: true      # без этого retention_period не применяется
+    delete_request_store: filesystem
+  ingester:
+    chunk_encoding: snappy
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# компоненты других режимов — выключены явно
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+
+# Gateway (nginx) — единая точка входа: loki-gateway:80 -> push/query. Его адрес используют Alloy и Grafana.
+gateway:
+  enabled: true
+  replicas: 1
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+
+# лишнее для лабы
+chunksCache: { enabled: false }   # memcached, по умолчанию просит 8Gi RAM
+resultsCache: { enabled: false }
+lokiCanary: { enabled: false }    # DaemonSet, пишет и читает тестовые логи для self-monitoring
+test: { enabled: false }
+minio: { enabled: false }
+
+monitoring:
+  serviceMonitor:
+    enabled: true                 # метрики Loki в наш Prometheus
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
