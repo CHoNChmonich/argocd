@@ -1,0 +1,29 @@
+# Приложение: чарт charts/shop из этого же репозитория + values-lab.yaml.
+# Альтернатива для прод-цикла — версионированный чарт из OCI-registry:
+#   source: { repoURL: kind-registry:5000/charts, chart: shop, targetRevision: 0.1.0 }  (+ Secret репозитория с enableOCI)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"     # после всех зависимостей
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/CHoNChmonich/argocd.git
+    targetRevision: main
+    path: charts/shop
+    helm:
+      releaseName: shop
+      valueFiles:
+        - values-lab.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: shop
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

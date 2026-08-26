@@ -1,0 +1,51 @@
+# argo/argo-cd 10.4.0 (Argo CD v3.5). Полный список: infra/charts/argo-cd/values.yaml
+#
+# Компоненты: application-controller (diff/sync), repo-server (clone + helm template), server (API+UI),
+# redis (кэш), applicationset-controller. Dex (SSO) и notifications для лабы выключены.
+
+fullnameOverride: argocd
+
+configs:
+  cm:
+    # Как Argo помечает "свои" объекты. По умолчанию — label app.kubernetes.io/instance=<Application>,
+    # но эту метку используют bitnami-чарты в селекторах (instance=<release>) — конфликт. Аннотация безопасна.
+    application.resourceTrackingMethod: annotation
+    # ускорить реакцию на изменения в git (default 3m); в проде — webhook от GitHub
+    timeout.reconciliation: 60s
+  params:
+    # TLS терминируется в ingress-nginx; сам server отдаёт HTTP (иначе redirect-петля за прокси)
+    server.insecure: true
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: argocd.shop.localtest.me
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+controller:
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { memory: 1Gi }
+
+repoServer:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+redis:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 128Mi }
+
+applicationSet:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+dex:
+  enabled: false
+notifications:
+  enabled: false

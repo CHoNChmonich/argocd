@@ -1,28 +1,38 @@
 #!/usr/bin/env bash
-# Деплой приложения helm-чартом charts/shop. Зависимости — cluster/deps.sh, платформа — cluster/bootstrap.sh.
-#   scripts/deploy.sh            # upgrade --install
-#   scripts/deploy.sh diff       # только показать, что изменится (нужен плагин helm-diff) или рендер
+# В GitOps-режиме деплой = коммит в git. Этот скрипт: проверить чарт локально, запушить,
+# попросить Argo CD перечитать репозиторий немедленно (иначе — до 60 с) и дождаться Synced/Healthy.
+#
+#   scripts/deploy.sh             # lint + template + push + refresh + wait
+#   scripts/deploy.sh template    # только рендер
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-RELEASE=shop
-NS=shop
+APP=shop
 VALUES=(-f charts/shop/values-lab.yaml)
 
-kubectl apply -f cluster/namespace-shop.yaml
-
-case "${1:-}" in
-  template) helm template "$RELEASE" ./charts/shop -n "$NS" "${VALUES[@]}"; exit ;;
-  diff)     helm diff upgrade "$RELEASE" ./charts/shop -n "$NS" "${VALUES[@]}" 2>/dev/null \
-              || { echo "helm-diff не установлен: helm plugin install https://github.com/databus23/helm-diff"; exit 1; }; exit ;;
-esac
+if [ "${1:-}" = "template" ]; then
+  helm template "$APP" ./charts/shop -n shop "${VALUES[@]}" \
+    --api-versions monitoring.coreos.com/v1 --api-versions autoscaling.k8s.io/v1
+  exit
+fi
 
 helm lint ./charts/shop "${VALUES[@]}"
-helm upgrade --install "$RELEASE" ./charts/shop \
-  --namespace "$NS" \
-  "${VALUES[@]}" \
-  --wait --timeout 5m
 
-echo ">> helm test"
-helm test "$RELEASE" -n "$NS" --logs 2>&1 | tail -12
-kubectl -n "$NS" get deploy,hpa,pdb,vpa -l app.kubernetes.io/instance="$RELEASE"
+if [ -n "$(git status --porcelain charts/shop gitops)" ]; then
+  echo "!! есть незакоммиченные изменения в charts/shop или gitops/ — Argo видит только то, что в git (origin/main)"
+  git status --short charts/shop gitops
+  exit 1
+fi
+git push -q origin main
+
+echo ">> refresh Application $APP"
+kubectl -n argocd annotate application "$APP" argocd.argoproj.io/refresh=normal --overwrite >/dev/null
+
+echo ">> ожидание Synced/Healthy"
+for i in $(seq 1 60); do
+  s=$(kubectl -n argocd get application "$APP" -o jsonpath='{.status.sync.status}/{.status.health.status}')
+  [ "$s" = "Synced/Healthy" ] && { echo "   $s"; break; }
+  sleep 5
+done
+kubectl -n argocd get application "$APP"
+kubectl -n shop get deploy,hpa -l app.kubernetes.io/instance="$APP"

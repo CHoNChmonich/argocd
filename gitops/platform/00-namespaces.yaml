@@ -1,0 +1,20 @@
+# Namespace'ы приложений с Pod Security-метками — обычные YAML из cluster/namespaces/, без Helm.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespaces
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/CHoNChmonich/argocd.git
+    targetRevision: main
+    path: cluster/namespaces
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: { prune: false, selfHeal: true }   # namespace не удаляем автоматически: внутри данные

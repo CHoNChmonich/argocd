@@ -1,49 +1,24 @@
 #!/usr/bin/env bash
-# Инфраструктурные компоненты кластера (не приложение): мониторинг, ingress-controller, metrics-server, VPA.
-# Чарты лежат в репозитории (infra/charts/<chart>, скачаны infra/vendor.sh), наши values — в infra/values.
-# Ставятся как Helm-релизы из ЛОКАЛЬНОГО пути: helm upgrade --install <release> ./infra/charts/<chart>
+# Bootstrap кластера в GitOps-режиме. Руками ставится ТОЛЬКО Argo CD и корневой Application;
+# всё остальное (мониторинг, ingress, metrics-server, VPA, БД, брокер, приложение) Argo CD
+# поднимает сам из git (gitops/platform, gitops/apps), соблюдая порядок через sync-waves.
 #
-# Порядок важен: kube-prometheus-stack первым — он приносит CRD (ServiceMonitor, PrometheusRule),
-# на которые ссылаются values ingress-nginx и чартов зависимостей (cluster/deps.sh).
+# Предусловия: кластер, локальный registry (cluster/registry.sh), образы запушены (scripts/build-images.sh),
+# репозиторий запушен в GitHub — Argo читает его по сети, локальная папка ему недоступна.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo ">> kube-prometheus-stack (Prometheus Operator + Prometheus + Alertmanager + Grafana + exporters)"
-helm upgrade --install kube-prometheus-stack ./infra/charts/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
-  -f infra/values/kube-prometheus-stack.yaml \
+echo ">> argo-cd (единственный helm-релиз, который ставится руками)"
+helm upgrade --install argo-cd ./infra/charts/argo-cd \
+  --namespace argocd --create-namespace \
+  -f infra/values/argo-cd.yaml \
   --wait --timeout 10m
 
-echo ">> loki (хранилище логов, single-binary)"
-helm upgrade --install loki ./infra/charts/loki \
-  --namespace monitoring \
-  -f infra/values/loki.yaml \
-  --wait --timeout 10m
+echo ">> root Application (app of apps)"
+kubectl apply -f gitops/bootstrap/root.yaml
 
-echo ">> alloy (DaemonSet: читает логи подов через kubelet и шлёт в Loki)"
-helm upgrade --install alloy ./infra/charts/alloy \
-  --namespace monitoring \
-  -f infra/values/alloy.yaml \
-  --wait --timeout 5m
+echo ">> admin-пароль Argo CD (UI: http://argocd.shop.localtest.me, логин admin):"
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 
-echo ">> ingress-nginx"
-helm upgrade --install ingress-nginx ./infra/charts/ingress-nginx \
-  --namespace ingress-nginx --create-namespace \
-  -f infra/values/ingress-nginx.yaml \
-  --wait --timeout 5m
-
-echo ">> metrics-server (нужен для HPA и kubectl top)"
-helm upgrade --install metrics-server ./infra/charts/metrics-server \
-  --namespace kube-system \
-  -f infra/values/metrics-server.yaml \
-  --wait --timeout 5m
-
-echo ">> vertical-pod-autoscaler (recommender / updater / admission webhook)"
-helm upgrade --install vpa ./infra/charts/vpa \
-  --namespace vpa --create-namespace \
-  -f infra/values/vpa.yaml \
-  --wait --timeout 5m
-
-echo ">> done"
-helm list -A
-kubectl get svc -n ingress-nginx ingress-nginx-controller
+echo ">> состояние Application'ов (обновляется по мере синхронизации):"
+kubectl -n argocd get applications

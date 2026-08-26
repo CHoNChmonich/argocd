@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    # порядок между Application'ами в app-of-apps: меньше — раньше; следующая волна ждёт Healthy предыдущей
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io   # удалить Application -> удалить и его объекты в кластере
+spec:
+  project: default
+  # multi-source: [0] чарт из git-пути, [1] тот же репозиторий как источник values-файла ($values)
+  sources:
+    - repoURL: https://github.com/CHoNChmonich/argocd.git
+      targetRevision: main
+      path: infra/charts/alloy
+      helm:
+        releaseName: alloy
+        valueFiles:
+          - $values/infra/values/alloy.yaml
+    - repoURL: https://github.com/CHoNChmonich/argocd.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true      # объект исчез из git -> удалить из кластера
+      selfHeal: true   # объект изменили руками -> вернуть как в git
+    syncOptions:
+      - CreateNamespace=true
