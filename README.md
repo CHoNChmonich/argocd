@@ -308,8 +308,11 @@ root (Application, path gitops/, recurse) ──▶ platform/*.yaml, apps/shop.y
 
 Каждый Application — **multi-source**: источник 1 — чарт из helm/OCI-репозитория (`chart` + `targetRevision`),
 источник 2 — наш git как `ref: values`, откуда берётся `$values/infra/values/<x>.yaml`. OCI-registry объявлены
-Secret'ами в `gitops/platform/01-repositories.yaml` (`argocd.argoproj.io/secret-type: repository`); для
-`kind-registry:5000` — `insecure`, т.к. HTTP. Наш чарт — версионированный артефакт в том же registry, что и образы:
+Secret'ами в `gitops/platform/01-repositories.yaml` (`argocd.argoproj.io/secret-type: repository`). Bitnami —
+`type: helm` + `enableOCI`; наш `kind-registry` работает по HTTP, а helm-тип умеет только TLS (`insecure` = не проверять
+сертификат, `helm pull` без `--plain-http` падает) — поэтому для него **нативный OCI-источник Argo CD 3.x**:
+`type: oci`, `url: oci://kind-registry:5000/charts/shop`, `insecureOCIForceHttp: "true"`, а в Application —
+`repoURL: oci://…`, `targetRevision: <версия>`, `path: .`. Наш чарт — версионированный артефакт в том же registry, что и образы:
 `scripts/publish-chart.sh` → `targetRevision` в `gitops/apps/shop.yaml` → push. Для разработки шаблонов можно
 временно указать источник `path: charts/shop` (пример в комментарии файла).
 Argo не использует `helm install`: он делает `helm template` и применяет результат сам (`helm list` релизов не покажет).
