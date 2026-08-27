@@ -68,7 +68,7 @@ UI: Jaeger http://localhost:16686 · Prometheus http://localhost:9090 · RabbitM
 services/            приложение: common/, orders/, inventory/, notifier/, Dockerfile
 charts/shop/         Helm-чарт приложения (этап 3)
 gitops/              Argo CD: bootstrap/root.yaml (app of apps), platform/*.yaml, apps/shop.yaml (этап 4)
-infra/charts/        внешние Helm-чарты (vendored), infra/values/ — наши values к ним
+infra/values/        наши values к внешним чартам (сами чарты Argo берёт из репозиториев по версии)
 cluster/             registry.sh, bootstrap.sh (Argo CD + root), namespaces/ (Namespace с Pod Security)
 deploy/local/        конфиги для docker-compose (prometheus)
 scripts/             build-images.sh, deploy.sh, load.py
@@ -83,24 +83,20 @@ Helm 3 — только клиент (в кластере ничего не ст
 ```bash
 bash cluster/registry.sh         # локальный registry localhost:5001, подключён к нодам kind
 bash scripts/build-images.sh     # build + push localhost:5001/shop/{orders,inventory,notifier}:dev
+bash scripts/publish-chart.sh    # helm package + push charts/shop -> localhost:5001/charts/shop:<version>
 bash cluster/bootstrap.sh        # helm: только Argo CD + root Application; всё остальное Argo поднимает из git
 # дальше любое изменение = commit + push; scripts/deploy.sh = lint + push + refresh + ожидание Synced/Healthy
 ```
 
-### Внешние чарты хранятся в репозитории (vendoring)
+### Внешние чарты: из helm/OCI-репозиториев, values — в git
 
-Чарт — это tar.gz с `Chart.yaml + templates/ + values.yaml`. `infra/vendor.sh` скачивает их
-(`helm pull --untar`) в `infra/charts/<chart>/`, версии зафиксированы в скрипте; наши переопределения —
-в `infra/values/<chart>.yaml`. Установка идёт из локального пути:
+Чарт — это tar.gz с `Chart.yaml + templates/ + values.yaml`, лежит в репозитории чартов автора (классический
+helm-репозиторий или OCI-registry). Argo CD тянет его оттуда по версии (`targetRevision` в `gitops/platform/*.yaml`),
+а наши переопределения берёт из `infra/values/<chart>.yaml` этого репозитория (multi-source, `$values`).
+В git чужого кода нет; обновление компонента = поменять версию в одном файле.
 
-```bash
-helm upgrade --install ingress-nginx ./infra/charts/ingress-nginx -n ingress-nginx -f infra/values/ingress-nginx.yaml
-helm list -A                                   # релизы
-helm get values ingress-nginx -n ingress-nginx # что переопределено
-helm template ingress-nginx ./infra/charts/ingress-nginx -f infra/values/ingress-nginx.yaml | less   # что будет применено
-```
-
-Обновление компонента = поменять версию в `vendor.sh`, перезапустить, посмотреть `git diff` по чарту, `bootstrap.sh`/`deps.sh`.
+Посмотреть, что внутри чарта: `helm show values <repo>/<chart> --version X` или `bash infra/vendor.sh`
+(скачивает в `infra/charts/`, папка в `.gitignore`). На этапах 2-3 чарты лежали в git (vendoring) — история: `git show a060fe5`.
 
 ### Зависимости приложения (`cluster/deps.sh`)
 
@@ -307,17 +303,22 @@ root (Application, path gitops/, recurse) ──▶ platform/*.yaml, apps/shop.y
    wave  0  kube-prometheus-stack (CRD для остальных; ServerSideApply — CRD > 262 КБ)
    wave  1  ingress-nginx, metrics-server, vpa
    wave  2  loki, alloy, postgresql, redis, rabbitmq, jaeger
-   wave  3  shop                  charts/shop + values-lab.yaml
+   wave  3  shop                  kind-registry:5000/charts/shop:0.1.0 + values-lab.yaml из git
 ```
 
-Каждый платформенный Application — **multi-source**: источник 1 — путь к vendored-чарту `infra/charts/<x>`,
-источник 2 — тот же репозиторий как `ref: values`, откуда берётся `$values/infra/values/<x>.yaml`.
+Каждый Application — **multi-source**: источник 1 — чарт из helm/OCI-репозитория (`chart` + `targetRevision`),
+источник 2 — наш git как `ref: values`, откуда берётся `$values/infra/values/<x>.yaml`. OCI-registry объявлены
+Secret'ами в `gitops/platform/01-repositories.yaml` (`argocd.argoproj.io/secret-type: repository`); для
+`kind-registry:5000` — `insecure`, т.к. HTTP. Наш чарт — версионированный артефакт в том же registry, что и образы:
+`scripts/publish-chart.sh` → `targetRevision` в `gitops/apps/shop.yaml` → push. Для разработки шаблонов можно
+временно указать источник `path: charts/shop` (пример в комментарии файла).
 Argo не использует `helm install`: он делает `helm template` и применяет результат сам (`helm list` релизов не покажет).
 
 UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
 
-Добавить компонент = файл в `gitops/platform/` + values в `infra/values/` + чарт в `infra/charts/` (`vendor.sh`) + push.
-Выкатить новую версию приложения = `build-images.sh` (новый тег) → тег в `charts/shop/values-lab.yaml` → push.
+Добавить компонент = файл в `gitops/platform/` (репозиторий + chart + версия) + values в `infra/values/` + push.
+Выкатить новую версию приложения = `build-images.sh` (новый тег) → тег в values, `version` в `Chart.yaml` →
+`publish-chart.sh` → `targetRevision` в `gitops/apps/shop.yaml` → push.
 
 Что поймали при переезде:
 - репозиторий был приватным — Argo не может клонировать анонимно (`authentication required: Repository not found`);

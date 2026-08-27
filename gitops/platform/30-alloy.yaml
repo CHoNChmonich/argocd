@@ -4,17 +4,16 @@ metadata:
   name: alloy
   namespace: argocd
   annotations:
-    # порядок между Application'ами в app-of-apps: меньше — раньше; следующая волна ждёт Healthy предыдущей
-    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-wave: "2"   # порядок в app-of-apps: меньше — раньше
   finalizers:
-    - resources-finalizer.argocd.argoproj.io   # удалить Application -> удалить и его объекты в кластере
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  # multi-source: [0] чарт из git-пути, [1] тот же репозиторий как источник values-файла ($values)
+  # multi-source: [0] чарт из репозитория чартов (версия = targetRevision), [1] наш git как источник values ($values)
   sources:
-    - repoURL: https://github.com/CHoNChmonich/argocd.git
-      targetRevision: main
-      path: infra/charts/alloy
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: 1.12.0
       helm:
         releaseName: alloy
         valueFiles:
@@ -27,7 +26,7 @@ spec:
     namespace: monitoring
   syncPolicy:
     automated:
-      prune: true      # объект исчез из git -> удалить из кластера
-      selfHeal: true   # объект изменили руками -> вернуть как в git
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true

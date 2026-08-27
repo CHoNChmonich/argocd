@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Скачивает исходники внешних чартов в infra/charts/ (vendoring).
-# Чарт — это tar.gz с Chart.yaml + templates/ + values.yaml; здесь он распакован и закоммичен,
-# чтобы было видно, что именно ставится, и чтобы обновление версии было diff'ом в PR.
+# ИНСТРУМЕНТ ДЛЯ ЧТЕНИЯ, не часть деплоя. Скачивает исходники чартов в infra/charts/ (в .gitignore),
+# чтобы посмотреть templates/ и values.yaml той версии, которую ставит Argo CD.
+# Источник правды по версиям — gitops/platform/*.yaml (targetRevision); здесь версии продублированы
+# для удобства и должны совпадать.
 #
-# Обновить компонент: поменять версию ниже, запустить скрипт, посмотреть git diff, закоммитить.
-# Два вида источников: классический helm-репозиторий (alias/chart, нужен helm repo add)
-# и OCI-registry (oci://..., repo add не нужен — чарт лежит рядом с образами).
+#   bash infra/vendor.sh              # скачать все
+#   helm show values <repo>/<chart> --version X   # альтернатива без скачивания
 set -euo pipefail
 cd "$(dirname "$0")"
 

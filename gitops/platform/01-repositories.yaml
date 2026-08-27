@@ -1,0 +1,35 @@
+# Репозитории чартов, которые Argo должен знать заранее. Классические helm-репозитории (https://...) объявлять
+# не нужно; OCI-registry — нужно (enableOCI), а для HTTP-registry без TLS — ещё и insecure.
+# Secret с label argocd.argoproj.io/secret-type=repository — штатный способ; кредов тут нет (публичный/локальный).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-bitnamicharts
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+stringData:
+  name: bitnamicharts
+  type: helm
+  url: registry-1.docker.io/bitnamicharts
+  enableOCI: "true"
+---
+# Локальный registry проекта (cluster/registry.sh): образы shop/* и чарт charts/shop.
+# Из кластера доступен как kind-registry:5000 (контейнер в docker-сети kind), по HTTP.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-kind-registry
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+stringData:
+  name: kind-registry
+  type: helm
+  url: kind-registry:5000/charts
+  enableOCI: "true"
+  insecure: "true"

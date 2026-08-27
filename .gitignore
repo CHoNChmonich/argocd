@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 .env
 dist/
+infra/charts/   # чарты скачиваются infra/vendor.sh только для чтения; деплой идёт из registry (gitops/)

@@ -1,6 +1,11 @@
-# Приложение: чарт charts/shop из этого же репозитория + values-lab.yaml.
-# Альтернатива для прод-цикла — версионированный чарт из OCI-registry:
-#   source: { repoURL: kind-registry:5000/charts, chart: shop, targetRevision: 0.1.0 }  (+ Secret репозитория с enableOCI)
+# Приложение: версионированный чарт из локального OCI-registry (helm package + helm push, см. README)
+# + values-lab.yaml из git. "Что задеплоено" = версия артефакта в targetRevision.
+#
+# Вариант для разработки чарта (правка шаблона видна без package/push): вместо первого источника —
+#   - repoURL: https://github.com/CHoNChmonich/argocd.git
+#     targetRevision: main
+#     path: charts/shop
+#     helm: { releaseName: shop, valueFiles: [values-lab.yaml] }
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -12,14 +17,17 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: https://github.com/CHoNChmonich/argocd.git
-    targetRevision: main
-    path: charts/shop
-    helm:
-      releaseName: shop
-      valueFiles:
-        - values-lab.yaml
+  sources:
+    - repoURL: kind-registry:5000/charts   # Secret repo-kind-registry (OCI, insecure)
+      chart: shop
+      targetRevision: 0.1.0
+      helm:
+        releaseName: shop
+        valueFiles:
+          - $values/charts/shop/values-lab.yaml
+    - repoURL: https://github.com/CHoNChmonich/argocd.git
+      targetRevision: main
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: shop
