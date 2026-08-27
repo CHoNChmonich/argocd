@@ -67,8 +67,9 @@ UI: Jaeger http://localhost:16686 · Prometheus http://localhost:9090 · RabbitM
 ```
 services/            приложение: common/, orders/, inventory/, notifier/, Dockerfile
 charts/shop/         Helm-чарт приложения (этап 3)
+gitops/              Argo CD: bootstrap/root.yaml (app of apps), platform/*.yaml, apps/shop.yaml (этап 4)
 infra/charts/        внешние Helm-чарты (vendored), infra/values/ — наши values к ним
-cluster/             registry.sh, bootstrap.sh (мониторинг, ingress, metrics-server, VPA), deps.sh (postgres, redis, rabbitmq, jaeger), namespace-shop.yaml
+cluster/             registry.sh, bootstrap.sh (Argo CD + root), namespaces/ (Namespace с Pod Security)
 deploy/local/        конфиги для docker-compose (prometheus)
 scripts/             build-images.sh, deploy.sh, load.py
 docker-compose.yaml  локальный стенд без k8s
@@ -81,10 +82,9 @@ Helm 3 — только клиент (в кластере ничего не ст
 
 ```bash
 bash cluster/registry.sh         # локальный registry localhost:5001, подключён к нодам kind
-bash cluster/bootstrap.sh        # helm из infra/charts: kube-prometheus-stack, loki, alloy, ingress-nginx, metrics-server, VPA
-bash cluster/deps.sh             # helm: postgresql, redis, rabbitmq, jaeger в namespace shop (StatefulSet + PVC)
 bash scripts/build-images.sh     # build + push localhost:5001/shop/{orders,inventory,notifier}:dev
-bash scripts/deploy.sh           # helm upgrade --install shop ./charts/shop -f values-lab.yaml + helm test
+bash cluster/bootstrap.sh        # helm: только Argo CD + root Application; всё остальное Argo поднимает из git
+# дальше любое изменение = commit + push; scripts/deploy.sh = lint + push + refresh + ожидание Synced/Healthy
 ```
 
 ### Внешние чарты хранятся в репозитории (vendoring)
@@ -292,6 +292,41 @@ helm install shop oci://localhost:5001/charts/shop --version 0.1.0 --plain-http 
 Грабли, пойманные при переезде: `imagePullPolicy: IfNotPresent` + мутабельный тег `:dev` — нода не подтянула
 пересобранный образ, поды стартовали со старым кодом (в лабе `pullPolicy: Always`, в проде — иммутабельные теги);
 Helm не принимает объекты, созданные `kubectl apply` с теми же именами — старые манифесты сначала удаляются.
+
+## Этап 4: GitOps — Argo CD
+
+Pull-модель: контроллер в кластере сам клонирует https://github.com/CHoNChmonich/argocd и приводит кластер
+к состоянию из git. `helm upgrade`/`kubectl apply` руками больше не делаются (Argo с `selfHeal` откатит за секунды —
+`kubectl scale deploy/notifier --replicas=5` вернулся к 2 через 15 с).
+
+```
+cluster/bootstrap.sh ──▶ helm install argo-cd (infra/charts/argo-cd + infra/values/argo-cd.yaml)
+                     ──▶ kubectl apply gitops/bootstrap/root.yaml
+root (Application, path gitops/, recurse) ──▶ platform/*.yaml, apps/shop.yaml — по одному Application на компонент
+   wave -2  namespaces            cluster/namespaces/*.yaml (plain YAML)
+   wave  0  kube-prometheus-stack (CRD для остальных; ServerSideApply — CRD > 262 КБ)
+   wave  1  ingress-nginx, metrics-server, vpa
+   wave  2  loki, alloy, postgresql, redis, rabbitmq, jaeger
+   wave  3  shop                  charts/shop + values-lab.yaml
+```
+
+Каждый платформенный Application — **multi-source**: источник 1 — путь к vendored-чарту `infra/charts/<x>`,
+источник 2 — тот же репозиторий как `ref: values`, откуда берётся `$values/infra/values/<x>.yaml`.
+Argo не использует `helm install`: он делает `helm template` и применяет результат сам (`helm list` релизов не покажет).
+
+UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`).
+
+Добавить компонент = файл в `gitops/platform/` + values в `infra/values/` + чарт в `infra/charts/` (`vendor.sh`) + push.
+Выкатить новую версию приложения = `build-images.sh` (новый тег) → тег в `charts/shop/values-lab.yaml` → push.
+
+Что поймали при переезде:
+- репозиторий был приватным — Argo не может клонировать анонимно (`authentication required: Repository not found`);
+  сделали публичным (альтернатива — Secret с токеном, `argocd.argoproj.io/secret-type: repository`);
+- liveness `repo-server` (`/healthz?full=true`, timeout 1s) убивал под на WSL2 — таймауты проб подняты в values;
+- bitnami-чарты «запоминают» случайные пароли через `lookup`, а Argo рендерит без доступа к кластеру —
+  пароли (в т.ч. `postgresPassword`) заданы явно, иначе менялись бы при каждом sync;
+- `resourceTrackingMethod: annotation` — иначе Argo перезаписывает label `app.kubernetes.io/instance`, на который
+  завязаны селекторы bitnami-чартов.
 
 ## Дальше
 
