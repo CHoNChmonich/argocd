@@ -31,6 +31,15 @@ controller:
     limits: { memory: 1Gi }
 
 repoServer:
+  # /healthz?full=true у repo-server на медленном диске/WSL2 не укладывается в default timeout 1s ->
+  # liveness убивал под в CrashLoopBackOff. Даём пробам запас.
+  livenessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 5
+    periodSeconds: 15
+  readinessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 5
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }
