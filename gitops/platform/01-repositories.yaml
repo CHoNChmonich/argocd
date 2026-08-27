@@ -29,7 +29,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "-3"
 stringData:
   name: kind-registry
-  type: helm
-  url: kind-registry:5000/charts
-  enableOCI: "true"
-  insecure: "true"
+  # type helm + enableOCI умеет только TLS (insecure = не проверять сертификат, helm pull без --plain-http падает).
+  # Для HTTP-registry — нативный OCI-источник Argo CD 3.x: type oci + insecureOCIForceHttp.
+  type: oci
+  url: oci://kind-registry:5000/charts/shop
+  insecureOCIForceHttp: "true"

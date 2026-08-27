@@ -18,9 +18,9 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: kind-registry:5000/charts   # Secret repo-kind-registry (OCI, insecure)
-      chart: shop
-      targetRevision: 0.1.0
+    - repoURL: oci://kind-registry:5000/charts/shop   # нативный OCI-источник (Secret repo-kind-registry, HTTP)
+      targetRevision: 0.1.0                          # тег артефакта = версия чарта
+      path: .                                        # содержимое артефакта — сам чарт
       helm:
         releaseName: shop
         valueFiles:
