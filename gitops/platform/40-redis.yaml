@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: platform
   # multi-source: [0] чарт из репозитория чартов (версия = targetRevision), [1] наш git как источник values ($values)
   sources:
     - repoURL: registry-1.docker.io/bitnamicharts

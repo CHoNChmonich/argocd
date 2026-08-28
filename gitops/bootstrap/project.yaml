@@ -1,0 +1,24 @@
+# Проект для root (app of apps). Применяется руками вместе с root.yaml (cluster/bootstrap.sh):
+# root не может создать проект, на который сам ссылается, — контроллер отказывает Application без проекта.
+# Права минимальные: root имеет право только на "карточки" в namespace argocd — Application, AppProject,
+# Secret (репозитории). Ни одного пода/CRD/ClusterRole через root задеплоить нельзя.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: bootstrap
+  namespace: argocd
+spec:
+  description: app-of-apps root; only Argo CD objects in namespace argocd
+  sourceRepos:
+    - https://github.com/CHoNChmonich/argocd.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  clusterResourceWhitelist: []                 # никаких cluster-scoped объектов
+  namespaceResourceWhitelist:
+    - group: argoproj.io
+      kind: Application
+    - group: argoproj.io
+      kind: AppProject
+    - group: ""
+      kind: Secret

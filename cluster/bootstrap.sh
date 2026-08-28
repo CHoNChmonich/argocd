@@ -19,8 +19,8 @@ helm upgrade --install argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
   -f infra/values/argo-cd.yaml \
   --wait --timeout 10m
 
-echo ">> root Application (app of apps)"
-kubectl apply -f gitops/bootstrap/root.yaml
+echo ">> AppProject bootstrap + root Application (app of apps)"
+kubectl apply -f gitops/bootstrap/
 
 echo ">> admin-пароль Argo CD (UI: http://argocd.shop.localtest.me, логин admin):"
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo

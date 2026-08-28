@@ -16,7 +16,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: shop
   sources:
     - repoURL: oci://kind-registry:5000/charts/shop   # нативный OCI-источник (Secret repo-kind-registry, HTTP)
       targetRevision: 0.1.0                          # тег артефакта = версия чарта

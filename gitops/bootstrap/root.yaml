@@ -1,4 +1,4 @@
-# App of apps: единственный объект, который применяется руками (cluster/bootstrap.sh).
+# App of apps: применяется руками вместе с project.yaml (cluster/bootstrap.sh) — всё остальное из git.
 # Root следит за папкой gitops/ и создаёт все Application'ы из platform/ и apps/;
 # дальше каждый из них синхронизирует свой компонент. Добавить компонент = добавить файл и закоммитить.
 apiVersion: argoproj.io/v1alpha1
@@ -7,7 +7,7 @@ metadata:
   name: root
   namespace: argocd
 spec:
-  project: default
+  project: bootstrap
   source:
     repoURL: https://github.com/CHoNChmonich/argocd.git
     targetRevision: main

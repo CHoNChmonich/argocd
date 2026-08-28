@@ -1,0 +1,69 @@
+# AppProject — границы для групп Application'ов; контроллер проверяет source/destination/типы ресурсов
+# на каждом sync и отклоняет то, что не разрешено. Проекты режут по владельцу: platform vs shop.
+# Wave -4: проекты нужны раньше репозиториев и всех Application'ов.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  description: cluster platform (ingress, monitoring, autoscaling, databases)
+  # Каждый источник — явно. Новый чарт из другого репозитория = правка этого списка (осознанное решение, видно в PR).
+  sourceRepos:
+    - https://github.com/CHoNChmonich/argocd.git
+    - https://prometheus-community.github.io/helm-charts
+    - https://kubernetes.github.io/ingress-nginx
+    - https://kubernetes-sigs.github.io/metrics-server/
+    - https://charts.fairwinds.com/stable
+    - https://grafana.github.io/helm-charts
+    - https://jaegertracing.github.io/helm-charts
+    - registry-1.docker.io/bitnamicharts
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*'                # платформа ставит в любые namespace (kube-system, monitoring, shop...)
+  clusterResourceWhitelist:         # платформе нужны CRD, ClusterRole, Namespace, webhooks, PriorityClass
+    - group: '*'
+      kind: '*'
+  orphanedResources:
+    warn: true                      # ресурсы в целевых namespace, которыми не управляет ни один Application
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: shop
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  description: shop application team
+  sourceRepos:
+    - https://github.com/CHoNChmonich/argocd.git   # values
+    - oci://kind-registry:5000/charts/shop         # чарт
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: shop                               # только свой namespace
+  clusterResourceWhitelist: []                      # ни CRD, ни ClusterRole(Binding), ни Namespace
+  namespaceResourceBlacklist:                       # это ставит платформа, приложению нельзя
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  orphanedResources:
+    warn: true
+---
+# Встроенный default: Argo пересоздаёт его при удалении, поэтому не удаляем, а выхолащиваем —
+# Application с project: default не сможет ничего задеплоить.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  description: disabled - use explicit projects
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
