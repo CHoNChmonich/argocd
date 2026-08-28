@@ -296,9 +296,10 @@ Pull-модель: контроллер в кластере сам клонир�
 `kubectl scale deploy/notifier --replicas=5` вернулся к 2 через 15 с).
 
 ```
-cluster/bootstrap.sh ──▶ helm install argo-cd (infra/charts/argo-cd + infra/values/argo-cd.yaml)
+cluster/bootstrap.sh ──▶ helm template argo-cd (argo/argo-cd 10.4.0 + infra/values/argo-cd.yaml) | kubectl apply
                      ──▶ kubectl apply gitops/bootstrap/  (AppProject bootstrap + root)
 root (Application, path gitops/, recurse) ──▶ platform/*.yaml, apps/shop.yaml — по одному Application на компонент
+   wave -5  argo-cd               тот же чарт и values: Argo усыновляет себя (self-managing)
    wave -4  AppProject platform, shop; default выхолощен
    wave -3  Secret'ы репозиториев (OCI)
    wave -2  namespaces            cluster/namespaces/*.yaml (plain YAML)
@@ -342,6 +343,28 @@ UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get
 (Application без существующего проекта не синхронизируется). `default` не удаляем (Argo пересоздаст), а обнуляем из git.
 Новый источник чартов = правка `sourceRepos` в PR — осознанное решение, а не побочный эффект.
 
+### Argo управляет собой (`gitops/platform/00-argo-cd.yaml`)
+
+Bootstrap только рендерит чарт (`helm template | kubectl apply --server-side`) — helm-релиза нет, второго «владельца»
+не остаётся. Дальше Application `argo-cd` с тем же чартом и `infra/values/argo-cd.yaml` усыновляет объекты
+(spec совпадает → Synced без рестартов) и любое изменение values/версии идёт через git — проверено: `statusbadge.enabled`
+в values → через 30 с в `argocd-cm`. Обновление самого себя штатно: sync записан в статусе Application, перезапущенный
+controller его продолжает. Особенности:
+- `ignoreDifferences` + `RespectIgnoreDifferences=true` на `argocd-secret`: чарт не рендерит `admin.password`,
+  `admin.passwordMtime`, `server.secretkey` — их Argo дописывает в live-объект, selfHeal без этого стирал бы логин;
+- `ServerSideApply=true` — CRD Application/ApplicationSet больше лимита client-side annotation;
+- без `resources-finalizer`: удаление Application не должно сносить сам Argo;
+- Job `argocd-redis-secret-init` с helm-hook'ами: под kubectl — обычный Job, под Argo — PreSync-хук (идемпотентен);
+- известные «сироты» в `argocd` (`argocd-initial-admin-secret`, `argocd-redis`, ручные `bootstrap`/`root`) —
+  в `orphanedResources.ignore` проекта `platform`.
+
+**cluster-admin у контроллера — норма**: его права не могут быть уже суммы того, что через него деплоят
+(CRD, ClusterRole, любые namespace). Ограничивают не контроллер, а людей и токены: AppProject — что можно деплоить,
+`configs.rbac` в values (`argocd-rbac-cm`) — кто что может: `policy.default: role:readonly`, `role:platform-admin`
+(всё), `role:shop-dev` (get/sync/action/logs только в проекте `shop`, без правки Application, без exec). Привязка
+ролей к людям появится с SSO (dex); до этого один `admin`, который RBAC обходит. Альтернативы для других топологий —
+namespaced-install (`createClusterRoles: false`) и management-кластер с урезанным SA на каждый целевой кластер.
+
 Что поймали при переезде:
 - репозиторий был приватным — Argo не может клонировать анонимно (`authentication required: Repository not found`);
   сделали публичным (альтернатива — Secret с токеном, `argocd.argoproj.io/secret-type: repository`);
@@ -355,5 +378,5 @@ UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get
 
 1. NetworkPolicy, ResourceQuota/LimitRange, Job/CronJob (миграции как helm hook).
 2. Секреты: External Secrets / Sealed Secrets вместо паролей в values зависимостей; RBAC; cert-manager + TLS.
-   Argo: self-managing Application, ApplicationSet/окружения, webhook вместо поллинга, SSO, notifications, Rollouts.
+   Argo: ApplicationSet/окружения, webhook вместо поллинга, SSO (+ отключить admin), notifications, Rollouts.
 3. HPA по метрикам Prometheus (prometheus-adapter) и KEDA для notifier по длине очереди.
