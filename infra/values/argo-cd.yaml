@@ -1,4 +1,5 @@
-# argo/argo-cd 10.4.0 (Argo CD v3.5). Полный список: infra/charts/argo-cd/values.yaml
+# argo/argo-cd 10.4.0 (Argo CD v3.5). Полный список: helm show values argo/argo-cd --version 10.4.0
+# Ставится дважды одними и теми же values: cluster/bootstrap.sh (первый раз) и gitops/platform/00-argo-cd.yaml (дальше).
 #
 # Компоненты: application-controller (diff/sync), repo-server (clone + helm template), server (API+UI),
 # redis (кэш), applicationset-controller. Dex (SSO) и notifications для лабы выключены.
@@ -15,6 +16,24 @@ configs:
   params:
     # TLS терминируется в ingress-nginx; сам server отдаёт HTTP (иначе redirect-петля за прокси)
     server.insecure: true
+
+  # RBAC самого Argo (argocd-rbac-cm, Casbin). Контроллер — cluster-admin, и это норма для in-cluster Argo:
+  # его права не могут быть уже суммы того, что через него деплоят (CRD, ClusterRole, любые namespace).
+  # Ограничивают не контроллер, а людей и токены: AppProject задаёт границы, эти роли — кто что может внутри них.
+  # Пока без SSO (dex выключен) роли привязать не к кому — admin остаётся; при включении SSO:
+  # g, <группа-из-провайдера>, role:platform-admin и configs.params admin.enabled: false.
+  rbac:
+    policy.default: role:readonly         # вошёл без роли — только смотреть
+    policy.csv: |
+      # платформенная команда: всё, включая проекты, репозитории, кластеры; exec в поды — только им
+      p, role:platform-admin, *, *, *, allow
+      # команда shop: видеть, синхронизировать, откатывать и читать логи только в проекте shop;
+      # не может менять Application (spec, проект), создавать/удалять их, трогать проекты и репозитории, exec
+      p, role:shop-dev, applications, get,      shop/*, allow
+      p, role:shop-dev, applications, sync,     shop/*, allow
+      p, role:shop-dev, applications, action/*, shop/*, allow
+      p, role:shop-dev, logs,         get,      shop/*, allow
+      p, role:shop-dev, projects,     get,      shop,   allow
 
 server:
   ingress:

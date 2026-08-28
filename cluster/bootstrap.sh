@@ -9,15 +9,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ARGOCD_CHART_VERSION=10.4.0   # argo/argo-cd; сам Argo — единственное, что не под управлением Argo
+ARGOCD_CHART_VERSION=10.4.0   # argo/argo-cd; та же версия в gitops/platform/00-argo-cd.yaml (self-managing)
 
-echo ">> argo-cd $ARGOCD_CHART_VERSION"
+# Первый запуск: helm только рендерит (helm template), применяет kubectl. Helm-релиз не создаётся —
+# дальше этими объектами владеет Application argo-cd (gitops/platform/00-argo-cd.yaml), и второй
+# "владелец" в виде протухшего релиза (helm list) только вводил бы в заблуждение.
+echo ">> argo-cd $ARGOCD_CHART_VERSION (helm template | kubectl apply)"
 helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm repo update argo >/dev/null
-helm upgrade --install argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
-  --namespace argocd --create-namespace \
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+helm template argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
+  --namespace argocd --include-crds \
   -f infra/values/argo-cd.yaml \
-  --wait --timeout 10m
+  | kubectl apply --server-side --force-conflicts -n argocd -f -
+kubectl -n argocd rollout status deploy/argocd-server --timeout=10m
+kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=10m
+kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=10m
 
 echo ">> AppProject bootstrap + root Application (app of apps)"
 kubectl apply -f gitops/bootstrap/

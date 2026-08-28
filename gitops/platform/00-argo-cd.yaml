@@ -1,0 +1,44 @@
+# Argo CD управляет собственной установкой (self-managing). Первый запуск — cluster/bootstrap.sh
+# (helm template | kubectl apply тех же чарта и values); после этого Argo "усыновляет" свои объекты, и любое
+# изменение infra/values/argo-cd.yaml или версии чарта прилетает через git, как для всех остальных компонентов.
+# Обновление самого себя штатно: sync записан в статусе Application, перезапущенный controller его продолжает.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-cd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"    # основание всего — раньше проектов и репозиториев
+  # без resources-finalizer: удаление этого Application не должно сносить сам Argo
+spec:
+  project: platform
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.4.0              # держать в синхроне с ARGOCD_CHART_VERSION в cluster/bootstrap.sh
+      helm:
+        releaseName: argo-cd
+        valueFiles:
+          - $values/infra/values/argo-cd.yaml
+    - repoURL: https://github.com/CHoNChmonich/argocd.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  # argocd-secret: чарт рендерит его без admin.password / admin.passwordMtime / server.secretkey — их Argo
+  # дописывает в live-объект сам. Без ignoreDifferences selfHeal стирал бы их и ломал логин.
+  ignoreDifferences:
+    - kind: Secret
+      name: argocd-secret
+      jsonPointers:
+        - /data/admin.password
+        - /data/admin.passwordMtime
+        - /data/server.secretkey
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true              # CRD Application/ApplicationSet > 262 КБ (лимит client-side annotation)
+      - RespectIgnoreDifferences=true     # ignoreDifferences учитывать и при sync, не только в diff

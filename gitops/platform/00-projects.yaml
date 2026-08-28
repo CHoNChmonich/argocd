@@ -13,6 +13,7 @@ spec:
   # Каждый источник — явно. Новый чарт из другого репозитория = правка этого списка (осознанное решение, видно в PR).
   sourceRepos:
     - https://github.com/CHoNChmonich/argocd.git
+    - https://argoproj.github.io/argo-helm
     - https://prometheus-community.github.io/helm-charts
     - https://kubernetes.github.io/ingress-nginx
     - https://kubernetes-sigs.github.io/metrics-server/
