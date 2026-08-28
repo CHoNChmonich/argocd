@@ -297,8 +297,10 @@ Pull-модель: контроллер в кластере сам клонир�
 
 ```
 cluster/bootstrap.sh ──▶ helm install argo-cd (infra/charts/argo-cd + infra/values/argo-cd.yaml)
-                     ──▶ kubectl apply gitops/bootstrap/root.yaml
+                     ──▶ kubectl apply gitops/bootstrap/  (AppProject bootstrap + root)
 root (Application, path gitops/, recurse) ──▶ platform/*.yaml, apps/shop.yaml — по одному Application на компонент
+   wave -4  AppProject platform, shop; default выхолощен
+   wave -3  Secret'ы репозиториев (OCI)
    wave -2  namespaces            cluster/namespaces/*.yaml (plain YAML)
    wave  0  kube-prometheus-stack (CRD для остальных; ServerSideApply — CRD > 262 КБ)
    wave  1  ingress-nginx, metrics-server, vpa
@@ -323,6 +325,23 @@ UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get
 Выкатить новую версию приложения = `build-images.sh` (новый тег) → тег в values, `version` в `Chart.yaml` →
 `publish-chart.sh` → `targetRevision` в `gitops/apps/shop.yaml` → push.
 
+### AppProject — границы (`gitops/platform/00-projects.yaml`, `gitops/bootstrap/project.yaml`)
+
+Встроенный проект `default` разрешает всё везде, а Argo работает под cluster-admin → доступ в git = root в кластере.
+Проекты режут по владельцу, контроллер проверяет каждый sync и отклоняет нарушение
+(`destination ... do not match any of the allowed destinations in project`):
+
+| Проект | Application'ы | sourceRepos | destinations | cluster-scoped |
+|---|---|---|---|---|
+| `bootstrap` | root | наш git | только ns `argocd`, только Application/AppProject/Secret | нет |
+| `platform` | всё из `gitops/platform/` | наш git + перечисленные helm/OCI-репо | любой ns | да (CRD, ClusterRole, Namespace) |
+| `shop` | `gitops/apps/shop.yaml` | наш git + `oci://kind-registry:5000/charts/shop` | только ns `shop`; ResourceQuota/LimitRange запрещены | нет |
+| `default` | — | пусто | пусто | нет |
+
+`bootstrap`-проект лежит рядом с root и применяется руками: root не может создать проект, на который сам ссылается
+(Application без существующего проекта не синхронизируется). `default` не удаляем (Argo пересоздаст), а обнуляем из git.
+Новый источник чартов = правка `sourceRepos` в PR — осознанное решение, а не побочный эффект.
+
 Что поймали при переезде:
 - репозиторий был приватным — Argo не может клонировать анонимно (`authentication required: Repository not found`);
   сделали публичным (альтернатива — Secret с токеном, `argocd.argoproj.io/secret-type: repository`);
@@ -336,4 +355,5 @@ UI: http://argocd.shop.localtest.me (admin, пароль: `kubectl -n argocd get
 
 1. NetworkPolicy, ResourceQuota/LimitRange, Job/CronJob (миграции как helm hook).
 2. Секреты: External Secrets / Sealed Secrets вместо паролей в values зависимостей; RBAC; cert-manager + TLS.
+   Argo: self-managing Application, ApplicationSet/окружения, webhook вместо поллинга, SSO, notifications, Rollouts.
 3. HPA по метрикам Prometheus (prometheus-adapter) и KEDA для notifier по длине очереди.
