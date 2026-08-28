@@ -29,6 +29,17 @@ spec:
       kind: '*'
   orphanedResources:
     warn: true                      # ресурсы в целевых namespace, которыми не управляет ни один Application
+    ignore:                         # известные "сироты" в argocd: runtime-секреты Argo и ручной bootstrap
+      - kind: Secret
+        name: argocd-initial-admin-secret
+      - kind: Secret
+        name: argocd-redis
+      - group: argoproj.io
+        kind: AppProject
+        name: bootstrap
+      - group: argoproj.io
+        kind: Application
+        name: root
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

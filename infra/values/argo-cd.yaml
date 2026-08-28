@@ -13,6 +13,8 @@ configs:
     application.resourceTrackingMethod: annotation
     # ускорить реакцию на изменения в git (default 3m); в проде — webhook от GitHub
     timeout.reconciliation: 60s
+    # бейдж статуса Application без логина (/api/badge?name=shop) — первое изменение, применённое Argo к самому себе
+    statusbadge.enabled: "true"
   params:
     # TLS терминируется в ingress-nginx; сам server отдаёт HTTP (иначе redirect-петля за прокси)
     server.insecure: true
