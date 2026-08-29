@@ -379,9 +379,52 @@ Bootstrap с нуля проверен дважды (Docker Desktop пересо
 - `resourceTrackingMethod: annotation` — иначе Argo перезаписывает label `app.kubernetes.io/instance`, на который
   завязаны селекторы bitnami-чартов.
 
+## Этап 5: секреты, webhook, SSO
+
+### Sealed Secrets — пароли не в values (`gitops/platform/05-sealed-secrets.yaml`, `06-secrets.yaml`, `secrets/`)
+
+Раньше пароли лежали открытым текстом в `infra/values/*.yaml` публичного репозитория. Теперь:
+
+```
+scripts/seal.sh <ns> <name> key=value ...   ──kubeseal (публичный ключ из кластера)──▶  secrets/<ns>/<name>.yaml (SealedSecret)
+Argo (Application secrets, wave 0)  ──▶  SealedSecret в кластере  ──контроллер (приватный ключ)──▶  Secret <name>
+чарты читают Secret по имени: auth.existingSecret / existingPasswordSecret / grafana.admin.existingSecret
+```
+
+- Шифрование асимметричное (RSA-OAEP + AES-GCM), привязано к namespace+имени (scope `strict`): SealedSecret нельзя
+  перенести в другой namespace и расшифровать нигде, кроме этого кластера. Поэтому его безопасно коммитить.
+- Имена/ключи Secret'ов те же, что раньше создавали чарты (`postgresql`: `password`/`postgres-password`,
+  `redis`: `redis-password`, `rabbitmq`: `rabbitmq-password`/`rabbitmq-erlang-cookie`, `grafana-admin`,
+  `argocd-secret`) — чарт shop (`existingSecret` в values) не менялся.
+- Все пароли ротированы (старые есть в истории git). PVC Postgres/RabbitMQ пересозданы: данные инициализированы
+  старыми кредами. Ротация в проде = новый SealedSecret + перезапуск потребителей (env читается при старте пода).
+- `argocd-secret` теперь целиком из git (`configs.secret.createSecret: false`): bcrypt-хэш admin, `server.secretkey`
+  (подпись JWT), `webhook.github.secret`, позже `dex.github.*`. `ignoreDifferences` на него больше не нужен.
+- **Ключ контроллера — единственное, чего нет в git.** `cluster/sealed-secrets-key.sh` кладёт его в `cluster/secrets/`
+  (в `.gitignore`), `cluster/bootstrap.sh` восстанавливает **до** старта контроллера — иначе после пересоздания
+  кластера все SealedSecret'ы бесполезны и всё придётся перезапечатывать. В проде бэкап ключа — в Vault/KMS.
+  `keyrenewperiod: "0"` — без автоматической ротации ключа (иначе бэкап надо обновлять каждые 30 дней).
+- Миграция без простоя: с существующих Secret'ов снята tracking-аннотация Argo (чтобы prune их не удалил) и добавлена
+  `sealedsecrets.bitnami.com/managed: "true"` — контроллер перезаписал данные на месте вместо ошибки «already exists».
+- `.gitignore`: комментарий в одной строке с паттерном — часть паттерна; `infra/charts/   # ...` не работал.
+
+Альтернатива — External Secrets Operator: секреты живут в Vault/AWS SM/GCP SM, в git только `ExternalSecret`
+(ссылка «возьми ключ X из хранилища»). Правильнее для компаний с централизованным хранилищем; Sealed Secrets —
+когда хранилища нет и нужен self-contained GitOps.
+
+### Webhook вместо поллинга
+
+Argo принимает `POST /api/webhook` (GitHub/GitLab/Bitbucket/Gitea) и делает refresh всем Application'ам, чьи источники
+указывают на репозиторий из payload. Подпись `X-Hub-Signature-256` проверяется HMAC-ключом `webhook.github.secret`
+из `argocd-secret` (проверено: невалидная подпись → `400 HMAC verification failed`, валидная → 200 и refresh).
+Ключ читается при старте `argocd-server` — после смены секрета нужен рестарт. Поллинг (`timeout.reconciliation`)
+остаётся резервом (в проде — default 3m, у нас 60s, потому что GitHub не достаёт до localhost). Для реального
+webhook нужен публичный URL: GitHub → Settings → Webhooks → `https://<argo>/api/webhook`, content type json,
+secret = `webhook.github.secret`, событие push. Локально — туннель (cloudflared/ngrok) на `argocd.shop.localtest.me`.
+
 ## Дальше
 
 1. NetworkPolicy, ResourceQuota/LimitRange, Job/CronJob (миграции как helm hook).
-2. Секреты: External Secrets / Sealed Secrets вместо паролей в values зависимостей; RBAC; cert-manager + TLS.
-   Argo: ApplicationSet/окружения, webhook вместо поллинга, SSO (+ отключить admin), notifications, Rollouts.
+2. RBAC для людей (k8s), cert-manager + TLS. Argo: SSO через Dex/GitHub (+ отключить admin), ApplicationSet/окружения
+   (см. заметки в чате: envs/ папками, git files generator), notifications, Rollouts.
 3. HPA по метрикам Prometheus (prometheus-adapter) и KEDA для notifier по длине очереди.
