@@ -2,7 +2,7 @@
 # Ставится дважды одними и теми же values: cluster/bootstrap.sh (первый раз) и gitops/platform/00-argo-cd.yaml (дальше).
 #
 # Компоненты: application-controller (diff/sync), repo-server (clone + helm template), server (API+UI),
-# redis (кэш), applicationset-controller. Dex (SSO) и notifications для лабы выключены.
+# redis (кэш), applicationset-controller, dex (SSO). Notifications для лабы выключены.
 
 fullnameOverride: argocd
 
@@ -16,6 +16,21 @@ configs:
     timeout.reconciliation: 60s
     # бейдж статуса Application без логина (/api/badge?name=shop) — первое изменение, применённое Argo к самому себе
     statusbadge.enabled: "true"
+    # ---- SSO: Dex (OIDC-провайдер в составе Argo) + GitHub OAuth App ----
+    # Браузер: argocd -> /api/dex/auth -> github.com (логин) -> /api/dex/callback -> JWT с claims email/groups.
+    # url — issuer Dex и адрес для redirect'а; должен совпадать с Homepage/Callback в OAuth App:
+    #   Authorization callback URL = http://argocd.shop.localtest.me/api/dex/callback
+    # clientID/clientSecret — не здесь, а в argocd-secret (SealedSecret): ключи dex.github.clientID / dex.github.clientSecret.
+    url: http://argocd.shop.localtest.me
+    dex.config: |
+      connectors:
+        - type: github
+          id: github
+          name: GitHub
+          config:
+            clientID: $dex.github.clientID
+            clientSecret: $dex.github.clientSecret
+            # orgs: [{name: <org>}]  # с орг-командами Dex отдаёт groups "org:team" -> g, org:team, role:...
   params:
     # TLS терминируется в ingress-nginx; сам server отдаёт HTTP (иначе redirect-петля за прокси)
     server.insecure: true
@@ -33,6 +48,7 @@ configs:
   # g, <группа-из-провайдера>, role:platform-admin и configs.params admin.enabled: false.
   rbac:
     policy.default: role:readonly         # вошёл без роли — только смотреть
+    scopes: "[groups, email]"             # какие claims JWT считать субъектом: группы SSO и email пользователя
     policy.csv: |
       # платформенная команда: всё, включая проекты, репозитории, кластеры; exec в поды — только им
       p, role:platform-admin, *, *, *, allow
@@ -83,6 +99,9 @@ applicationSet:
     limits: { memory: 256Mi }
 
 dex:
-  enabled: false
+  enabled: false        # -> true после создания GitHub OAuth App и добавления dex.github.* в argocd-secret
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
 notifications:
   enabled: false
