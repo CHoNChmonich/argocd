@@ -1,0 +1,62 @@
+# hashicorp/vault 0.34.1 (Vault 2.0.4). Полный список: helm show values hashicorp/vault
+#
+# Single-node, storage raft на PVC (прод: 3-5 нод raft + auto-unseal через KMS). После каждого рестарта Vault
+# запечатан (sealed) — распечатывает cluster/vault-init.sh ключом из cluster/secrets/vault-init.json (вне git).
+# Секреты в кластер доставляет External Secrets Operator (Kubernetes auth, роль eso, политика eso-read).
+
+global:
+  tlsDisable: true              # TLS терминирует ingress-nginx; внутри кластера — HTTP (лаба)
+
+injector:
+  enabled: false                # sidecar-инжектор не нужен: секреты приносит ESO
+
+server:
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+      disable_mlock = true      # без capability IPC_LOCK (PSA restricted); для raft это и рекомендовано HashiCorp
+      listener "tcp" {
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+        tls_disable = 1
+        telemetry { unauthenticated_metrics_access = true }   # /v1/sys/metrics для Prometheus без токена
+      }
+      storage "raft" {
+        path = "/vault/data"
+      }
+      telemetry {
+        prometheus_retention_time = "30s"
+        disable_hostname = true
+      }
+      service_registration "kubernetes" {}
+  dataStorage:
+    enabled: true
+    size: 1Gi
+  # PSA restricted: чарт по умолчанию не ставит drop ALL / seccomp
+  statefulSet:
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      container:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: [ALL] }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - host: vault.shop.localtest.me
+
+serverTelemetry:
+  serviceMonitor:
+    enabled: true
+
+ui:
+  enabled: true

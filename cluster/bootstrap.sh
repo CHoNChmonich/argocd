@@ -19,16 +19,6 @@ helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm repo update argo >/dev/null
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 
-# Sealed Secrets: ключ шифрования — единственное, чего нет в git. Если есть бэкап (cluster/sealed-secrets-key.sh,
-# файл в .gitignore), кладём его ДО старта контроллера — тогда все SealedSecret из git расшифруются.
-# Без бэкапа контроллер сгенерирует новый ключ, и secrets/**/*.yaml придётся перезапечатать (scripts/seal.sh).
-if [ -f cluster/secrets/sealed-secrets-key.yaml ]; then
-  echo ">> sealed-secrets: восстанавливаю ключ из бэкапа"
-  kubectl apply -f cluster/namespaces/sealed-secrets.yaml
-  kubectl apply -f cluster/secrets/sealed-secrets-key.yaml
-else
-  echo "!! cluster/secrets/sealed-secrets-key.yaml не найден: контроллер создаст новый ключ, SealedSecret'ы в git не расшифруются"
-fi
 helm template argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
   --namespace argocd --include-crds \
   -f infra/values/argo-cd.yaml \
@@ -40,8 +30,9 @@ kubectl -n argocd rollout status statefulset/argocd-application-controller --tim
 echo ">> AppProject bootstrap + root Application (app of apps)"
 kubectl apply -f gitops/bootstrap/
 
-echo ">> admin-пароль Argo CD (UI: http://argocd.shop.localtest.me, логин admin):"
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+# Vault: init/unseal/наполнение — после root, когда Argo создал Application vault (wave -1) и под vault-0 поднялся.
+# Пароли (в т.ч. admin Argo) рождаются здесь и попадают в кластер через ESO; argocd-initial-admin-secret не создаётся.
+bash cluster/vault-init.sh
 
 echo ">> состояние Application'ов (обновляется по мере синхронизации):"
 kubectl -n argocd get applications

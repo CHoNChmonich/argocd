@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: sealed-secrets
+  name: vault
   labels:
     app.kubernetes.io/part-of: platform
     pod-security.kubernetes.io/enforce: restricted
