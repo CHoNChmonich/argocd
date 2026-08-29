@@ -381,36 +381,42 @@ Bootstrap с нуля проверен дважды (Docker Desktop пересо
 
 ## Этап 5: секреты, webhook, SSO
 
-### Sealed Secrets — пароли не в values (`gitops/platform/05-sealed-secrets.yaml`, `06-secrets.yaml`, `secrets/`)
+### Vault + External Secrets Operator — пароли не в git (`05-vault.yaml`, `05-external-secrets.yaml`, `06-secrets.yaml`, `secrets/`)
 
-Раньше пароли лежали открытым текстом в `infra/values/*.yaml` публичного репозитория. Теперь:
+Раньше пароли лежали открытым текстом в `infra/values/*.yaml` публичного репозитория (промежуточно — Sealed Secrets,
+заменён: значения всё равно жили в git, пусть и зашифрованными; ротация = коммит; нет аудита и динамических кредов).
 
 ```
-scripts/seal.sh <ns> <name> key=value ...   ──kubeseal (публичный ключ из кластера)──▶  secrets/<ns>/<name>.yaml (SealedSecret)
-Argo (Application secrets, wave 0)  ──▶  SealedSecret в кластере  ──контроллер (приватный ключ)──▶  Secret <name>
+cluster/vault-init.sh ──▶ Vault (KV v2 secret/<ns>/<name>: значения)           <- единственное, что не из git
+git: secrets/cluster-secret-store.yaml (как ходить в Vault) + secrets/<ns>/<name>.yaml (ExternalSecret: что принести)
+        │ Argo (Application secrets, wave 0)
+        ▼
+ESO ──(SA-токен → Vault Kubernetes auth, роль eso, политика eso-read)──▶ Vault ──▶ Secret <name> в кластере
 чарты читают Secret по имени: auth.existingSecret / existingPasswordSecret / grafana.admin.existingSecret
 ```
 
-- Шифрование асимметричное (RSA-OAEP + AES-GCM), привязано к namespace+имени (scope `strict`): SealedSecret нельзя
-  перенести в другой namespace и расшифровать нигде, кроме этого кластера. Поэтому его безопасно коммитить.
-- Имена/ключи Secret'ов те же, что раньше создавали чарты (`postgresql`: `password`/`postgres-password`,
-  `redis`: `redis-password`, `rabbitmq`: `rabbitmq-password`/`rabbitmq-erlang-cookie`, `grafana-admin`,
-  `argocd-secret`) — чарт shop (`existingSecret` в values) не менялся.
-- Все пароли ротированы (старые есть в истории git). PVC Postgres/RabbitMQ пересозданы: данные инициализированы
-  старыми кредами. Ротация в проде = новый SealedSecret + перезапуск потребителей (env читается при старте пода).
-- `argocd-secret` теперь целиком из git (`configs.secret.createSecret: false`): bcrypt-хэш admin, `server.secretkey`
-  (подпись JWT), `webhook.github.secret`, позже `dex.github.*`. `ignoreDifferences` на него больше не нужен.
-- **Ключ контроллера — единственное, чего нет в git.** `cluster/sealed-secrets-key.sh` кладёт его в `cluster/secrets/`
-  (в `.gitignore`), `cluster/bootstrap.sh` восстанавливает **до** старта контроллера — иначе после пересоздания
-  кластера все SealedSecret'ы бесполезны и всё придётся перезапечатывать. В проде бэкап ключа — в Vault/KMS.
-  `keyrenewperiod: "0"` — без автоматической ротации ключа (иначе бэкап надо обновлять каждые 30 дней).
-- Миграция без простоя: с существующих Secret'ов снята tracking-аннотация Argo (чтобы prune их не удалил) и добавлена
-  `sealedsecrets.bitnami.com/managed: "true"` — контроллер перезаписал данные на месте вместо ошибки «already exists».
-- `.gitignore`: комментарий в одной строке с паттерном — часть паттерна; `infra/charts/   # ...` не работал.
+- **Vault** (`hashicorp/vault 0.34.1`, single-node, storage raft на PVC, UI http://vault.shop.localtest.me):
+  хранит секреты зашифрованными, после каждого рестарта **запечатан** (sealed) — `cluster/vault-init.sh` распечатывает
+  unseal-ключом из `cluster/secrets/vault-init.json` (в `.gitignore`; прод — auto-unseal через KMS, 3-5 нод raft,
+  root-токен отзывают после настройки). PSA restricted: `disable_mlock = true` вместо capability IPC_LOCK, `drop ALL` + seccomp.
+- **ESO** (`external-secrets 2.10.0`): сам ничего не хранит. `ClusterSecretStore vault` — адрес, `path: secret`, KV v2,
+  auth Kubernetes: ESO предъявляет токен своего ServiceAccount `external-secrets`, Vault проверяет его через TokenReview
+  (ClusterRoleBinding `authDelegator` из чарта) и выдаёт токен роли `eso` с политикой `eso-read` (только чтение
+  `secret/data/*`). Статических кредов Vault в кластере нет. `ExternalSecret` — `dataFrom.extract: {key: shop/postgresql}`:
+  все ключи из Vault → ключи Secret как есть, `target.name` = имя, которое ждёт чарт, `refreshInterval: 1h`.
+- `vault-init.sh` идемпотентен: init (один раз) → unseal → KV/auth/policy/role → seed случайных паролей **только для
+  отсутствующих** путей (bcrypt admin Argo считает `argocd account bcrypt` в поде). `bootstrap.sh` вызывает его после root.
+  Ловушка: `cmd | grep -q` под `set -o pipefail` — grep закрывает пайп, kubectl получает SIGPIPE, условие ложно.
+- **Ротация без коммита**: `vault kv put secret/monitoring/grafana-admin admin-password=...` → ESO обновляет Secret за
+  `refreshInterval` (или сразу: `kubectl annotate externalsecret ... force-sync=$(date +%s)`). Проверено на Grafana.
+  Потребители, читающие секрет через env, увидят его после рестарта пода; через volume — kubelet обновит файл сам.
+- `argocd-secret` тоже из Vault (`configs.secret.createSecret: false`): bcrypt admin, `server.secretkey`, `webhook.github.secret`.
+- Миграция без простоя: с Secret'ов сняты `ownerReferences` SealedSecret'ов (иначе GC удалил бы их вместе с CRD),
+  текущие значения записаны в Vault поверх seed, ESO стал владельцем — данные байт-в-байт те же, PVC не пересоздавались.
+  Остатки Sealed Secrets (namespace с `prune: false`, CRD с `keep`) удалены руками.
 
-Альтернатива — External Secrets Operator: секреты живут в Vault/AWS SM/GCP SM, в git только `ExternalSecret`
-(ссылка «возьми ключ X из хранилища»). Правильнее для компаний с централизованным хранилищем; Sealed Secrets —
-когда хранилища нет и нужен self-contained GitOps.
+Что даёт Vault сверх «секрет в git»: аудит каждого чтения, политики per-consumer, TTL токенов, **динамические секреты**
+(движок `database` выдаёт временных пользователей Postgres) — следующий шаг этого этапа.
 
 ### Webhook вместо поллинга
 

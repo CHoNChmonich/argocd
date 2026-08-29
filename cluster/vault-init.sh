@@ -12,12 +12,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 NS=vault; POD=vault-0; INIT=cluster/secrets/vault-init.json
 v() { kubectl -n "$NS" exec -i "$POD" -- sh -c "VAULT_TOKEN=\${VAULT_TOKEN:-} $*"; }
+# NB: не "cmd | grep -q": с pipefail grep -q закрывает пайп раньше, kubectl ловит SIGPIPE и условие ложно.
+status() { v vault status -format=json 2>/dev/null || true; }
 
 echo ">> жду под $POD"
 for i in $(seq 1 60); do kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running && break; sleep 5; done
 
 # ---- init / unseal
-if ! v vault status -format=json 2>/dev/null | grep -q '"initialized": *true'; then
+if ! grep -q '"initialized": *true' <<<"$(status)"; then
   echo ">> init (1 unseal-ключ из 1 — лаба; прод: 5 из 3 или KMS auto-unseal)"
   mkdir -p cluster/secrets
   v vault operator init -key-shares=1 -key-threshold=1 -format=json > "$INIT"
@@ -25,15 +27,15 @@ fi
 [ -f "$INIT" ] || { echo "!! $INIT не найден: Vault инициализирован, но ключа нет — восстановить нельзя"; exit 1; }
 UNSEAL=$(python -c "import json,sys;print(json.load(open('$INIT'))['unseal_keys_b64'][0])")
 ROOT=$(python -c "import json,sys;print(json.load(open('$INIT'))['root_token'])")
-if v vault status -format=json 2>/dev/null | grep -q '"sealed": *true'; then
+if grep -q '"sealed": *true' <<<"$(status)"; then
   echo ">> unseal"; v vault operator unseal "$UNSEAL" >/dev/null
 fi
 export VAULT_TOKEN="$ROOT"
 vt() { kubectl -n "$NS" exec -i "$POD" -- env VAULT_TOKEN="$ROOT" "$@"; }
 
 # ---- setup
-vt vault secrets list -format=json | grep -q '"secret/"' || { echo ">> KV v2 на secret/"; vt vault secrets enable -path=secret kv-v2 >/dev/null; }
-vt vault auth list -format=json | grep -q '"kubernetes/"' || { echo ">> auth kubernetes"; vt vault auth enable kubernetes >/dev/null; }
+grep -q '"secret/"' <<<"$(vt vault secrets list -format=json)" || { echo ">> KV v2 на secret/"; vt vault secrets enable -path=secret kv-v2 >/dev/null; }
+grep -q '"kubernetes/"' <<<"$(vt vault auth list -format=json)" || { echo ">> auth kubernetes"; vt vault auth enable kubernetes >/dev/null; }
 # Vault проверяет SA-токены клиентов через TokenReview своим собственным SA-токеном (chart: authDelegator)
 vt vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443" >/dev/null
 vt sh -c 'vault policy write eso-read - <<EOF
