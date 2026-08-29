@@ -415,7 +415,16 @@ ESO ──(SA-токен → Vault Kubernetes auth, роль eso, политик
   текущие значения записаны в Vault поверх seed, ESO стал владельцем — данные байт-в-байт те же, PVC не пересоздавались.
   Остатки Sealed Secrets (namespace с `prune: false`, CRD с `keep`) удалены руками.
 
-**Ежедневная работа** (`scripts/vault.sh` = vault CLI в поде с root-токеном; прод — CLI на машине + личный OIDC-токен):
+**Доступ людей — не root.** `vault-init.sh` создаёт политику `platform-admin` (всё в `secret/*`, без администрирования
+Vault) и пользователя `artem` (auth-метод `userpass`). Вход выдаёт личный токен с TTL 8h (max 24h), каждое действие в
+аудите под `userpass-artem`; root-токен — только для bootstrap (прод: отозвать, людям — OIDC и группы → политики).
+```
+vault login -method=userpass username=artem      # CLI на машине: VAULT_ADDR=http://vault.shop.localtest.me
+kubectl -n vault exec -it vault-0 -- vault login -method=userpass username=artem   # или внутри пода
+```
+UI: метод Username. Сменить пароль: `vault write auth/userpass/users/artem password=NEW`.
+
+**Ежедневная работа** (`scripts/vault.sh` = обёртка над `kubectl exec vault-0 -- vault ...`; в проде — CLI на машине с личным токеном):
 
 | Задача | Команда |
 |---|---|

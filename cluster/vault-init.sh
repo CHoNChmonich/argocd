@@ -45,7 +45,22 @@ EOF' >/dev/null
 vt vault write auth/kubernetes/role/eso \
   bound_service_account_names=external-secrets bound_service_account_namespaces=external-secrets \
   policies=eso-read ttl=1h >/dev/null
-echo ">> setup: kv-v2 secret/, auth kubernetes, policy eso-read, role eso"
+# Люди: политика platform-admin (полный доступ к secret/*, без администрирования Vault) + userpass.
+# Прод: вместо userpass — OIDC (GitHub/Google) и группы -> политики; root-токен отзывается.
+vt sh -c 'vault policy write platform-admin - <<EOF
+path "secret/*"               { capabilities = ["create","read","update","patch","delete","list"] }
+path "sys/mounts"             { capabilities = ["read"] }
+path "sys/internal/ui/*"      { capabilities = ["read"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
+path "auth/token/renew-self"  { capabilities = ["update"] }
+EOF' >/dev/null
+grep -q '"userpass/"' <<<"$(vt vault auth list -format=json)" || { echo ">> auth userpass"; vt vault auth enable userpass >/dev/null; }
+if ! vt vault read auth/userpass/users/artem >/dev/null 2>&1; then
+  UPW=$(python -c "import secrets;print(secrets.token_urlsafe(12))")
+  vt vault write auth/userpass/users/artem password="$UPW" policies=platform-admin token_ttl=8h token_max_ttl=24h >/dev/null
+  echo ">> Vault user artem (userpass), пароль: $UPW  — сменить: vault write auth/userpass/users/artem password=NEW"
+fi
+echo ">> setup: kv-v2 secret/, auth kubernetes + userpass, policies eso-read + platform-admin, role eso, user artem"
 
 # ---- seed: только отсутствующие
 gen() { python -c "import secrets;print(secrets.token_urlsafe(24))"; }
