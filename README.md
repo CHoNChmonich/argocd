@@ -350,8 +350,10 @@ Bootstrap только рендерит чарт (`helm template | kubectl apply
 (spec совпадает → Synced без рестартов) и любое изменение values/версии идёт через git — проверено: `statusbadge.enabled`
 в values → через 30 с в `argocd-cm`. Обновление самого себя штатно: sync записан в статусе Application, перезапущенный
 controller его продолжает. Особенности:
-- `ignoreDifferences` + `RespectIgnoreDifferences=true` на `argocd-secret`: чарт не рендерит `admin.password`,
-  `admin.passwordMtime`, `server.secretkey` — их Argo дописывает в live-объект, selfHeal без этого стирал бы логин;
+- `ignoreDifferences` + `RespectIgnoreDifferences=true` на `argocd-secret` — страховка, а не необходимость: чарт
+  рендерит Secret без блока `data`, `admin.password`/`server.secretkey` дописывает сам Argo, и т.к. Argo сравнивает
+  только поля из desired, без правила diff тоже пустой (проверено: сняли правило и автосинк — Synced, ключи целы).
+  Нужно оно, если задать `configs.secret.*` в values — тогда `data` рендерится и смена пароля через UI даёт OutOfSync;
 - `ServerSideApply=true` — CRD Application/ApplicationSet больше лимита client-side annotation;
 - без `resources-finalizer`: удаление Application не должно сносить сам Argo;
 - Job `argocd-redis-secret-init` с helm-hook'ами: под kubectl — обычный Job, под Argo — PreSync-хук (идемпотентен);
@@ -364,6 +366,9 @@ controller его продолжает. Особенности:
 (всё), `role:shop-dev` (get/sync/action/logs только в проекте `shop`, без правки Application, без exec). Привязка
 ролей к людям появится с SSO (dex); до этого один `admin`, который RBAC обходит. Альтернативы для других топологий —
 namespaced-install (`createClusterRoles: false`) и management-кластер с урезанным SA на каждый целевой кластер.
+
+Bootstrap с нуля проверен дважды (Docker Desktop пересоздаёт kind-кластер при своём перезапуске — данные PVC
+теряются, registry с `--restart=always` переживает): `registry.sh` → `bootstrap.sh` → 14/14 Synced/Healthy за ~5 мин.
 
 Что поймали при переезде:
 - репозиторий был приватным — Argo не может клонировать анонимно (`authentication required: Repository not found`);

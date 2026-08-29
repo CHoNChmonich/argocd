@@ -26,8 +26,11 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
-  # argocd-secret: чарт рендерит его без admin.password / admin.passwordMtime / server.secretkey — их Argo
-  # дописывает в live-объект сам. Без ignoreDifferences selfHeal стирал бы их и ломал логин.
+  # argocd-secret: чарт рендерит его вообще без блока data (пока в values не заданы пароль/вебхуки), а
+  # admin.password / admin.passwordMtime / server.secretkey Argo дописывает в live-объект сам. Проверено:
+  # Argo сравнивает только поля из desired, поэтому и без ignoreDifferences diff пустой и ключи не стираются.
+  # Правило оставлено как страховка на случай, если в values появится configs.secret.* (тогда data рендерится,
+  # и смена пароля через UI/CLI давала бы вечный OutOfSync — см. argo-cd discussion #21185).
   ignoreDifferences:
     - kind: Secret
       name: argocd-secret
