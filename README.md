@@ -415,6 +415,21 @@ ESO ──(SA-токен → Vault Kubernetes auth, роль eso, политик
   текущие значения записаны в Vault поверх seed, ESO стал владельцем — данные байт-в-байт те же, PVC не пересоздавались.
   Остатки Sealed Secrets (namespace с `prune: false`, CRD с `keep`) удалены руками.
 
+**Ежедневная работа** (`scripts/vault.sh` = vault CLI в поде с root-токеном; прод — CLI на машине + личный OIDC-токен):
+
+| Задача | Команда |
+|---|---|
+| посмотреть, что есть | `scripts/vault.sh kv list secret/shop` |
+| прочитать | `scripts/vault.sh kv get secret/shop/redis` (`-field=redis-password` — одно значение) |
+| что реально в кластере | `kubectl -n shop get secret redis -o jsonpath='{.data.redis-password}' \| base64 -d` |
+| добавить секрет | `kv put secret/shop/x k=v` → `secrets/shop/x.yaml` (ExternalSecret) → push; чарт: `existingSecret: x`; строка `seed` в `vault-init.sh` |
+| изменить один ключ | `scripts/vault.sh kv patch secret/shop/postgresql password=NEW` (`put` перезаписывает **все** ключи) |
+| применить сразу | `kubectl -n shop annotate externalsecret postgresql force-sync=$(date +%s)` (иначе ≤ refreshInterval 1h) |
+| донести до потребителя | env-потребители: `kubectl rollout restart`; БД: пароль ещё и в данных — bitnami не меняет его на существующем PVC |
+| история / откат | `kv metadata get`, `kv get -version=N`, `kv rollback -version=N` (KV v2 хранит 10 версий) |
+| удалить | `kv delete` (soft, версия помечена), `kv destroy -versions=N`, `kv metadata delete` (всё); ExternalSecret из git → prune → Secret удалит GC |
+| статус доставки | `kubectl get externalsecret -A` (`SecretSynced`/`SecretSyncedError`), `kubectl get clustersecretstore` |
+
 Что даёт Vault сверх «секрет в git»: аудит каждого чтения, политики per-consumer, TTL токенов, **динамические секреты**
 (движок `database` выдаёт временных пользователей Postgres) — следующий шаг этого этапа.
 
