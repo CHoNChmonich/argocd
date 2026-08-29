@@ -50,7 +50,10 @@ alertmanager:
 
 # ---- Grafana ----
 grafana:
-  adminPassword: admin   # учебное; в проде — existingSecret / SSO
+  admin:
+    existingSecret: grafana-admin       # Sealed Secrets: secrets/monitoring/grafana-admin.yaml
+    userKey: admin-user
+    passwordKey: admin-password
   ingress:
     enabled: true
     ingressClassName: nginx

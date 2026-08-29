@@ -11,13 +11,20 @@ configs:
     # Как Argo помечает "свои" объекты. По умолчанию — label app.kubernetes.io/instance=<Application>,
     # но эту метку используют bitnami-чарты в селекторах (instance=<release>) — конфликт. Аннотация безопасна.
     application.resourceTrackingMethod: annotation
-    # ускорить реакцию на изменения в git (default 3m); в проде — webhook от GitHub
+    # Поллинг git — резерв; основной сигнал — webhook GitHub -> POST /api/webhook (подпись HMAC ключом
+    # webhook.github.secret из argocd-secret). Локально GitHub до кластера не достаёт, поэтому поллинг чаще default 3m.
     timeout.reconciliation: 60s
     # бейдж статуса Application без логина (/api/badge?name=shop) — первое изменение, применённое Argo к самому себе
     statusbadge.enabled: "true"
   params:
     # TLS терминируется в ingress-nginx; сам server отдаёт HTTP (иначе redirect-петля за прокси)
     server.insecure: true
+
+  # argocd-secret (admin.password bcrypt, server.secretkey для JWT, webhook.github.secret, позже dex.github.clientSecret)
+  # чарт НЕ создаёт — его даёт Sealed Secrets из secrets/argocd/argocd-secret.yaml. Argo дописывает туда ключи
+  # только если их нет, поэтому пароль admin задаётся из git, а не генерируется при старте.
+  secret:
+    createSecret: false
 
   # RBAC самого Argo (argocd-rbac-cm, Casbin). Контроллер — cluster-admin, и это норма для in-cluster Argo:
   # его права не могут быть уже суммы того, что через него деплоят (CRD, ClusterRole, любые namespace).

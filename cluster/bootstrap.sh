@@ -18,6 +18,17 @@ echo ">> argo-cd $ARGOCD_CHART_VERSION (helm template | kubectl apply)"
 helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm repo update argo >/dev/null
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+
+# Sealed Secrets: ключ шифрования — единственное, чего нет в git. Если есть бэкап (cluster/sealed-secrets-key.sh,
+# файл в .gitignore), кладём его ДО старта контроллера — тогда все SealedSecret из git расшифруются.
+# Без бэкапа контроллер сгенерирует новый ключ, и secrets/**/*.yaml придётся перезапечатать (scripts/seal.sh).
+if [ -f cluster/secrets/sealed-secrets-key.yaml ]; then
+  echo ">> sealed-secrets: восстанавливаю ключ из бэкапа"
+  kubectl apply -f cluster/namespaces/sealed-secrets.yaml
+  kubectl apply -f cluster/secrets/sealed-secrets-key.yaml
+else
+  echo "!! cluster/secrets/sealed-secrets-key.yaml не найден: контроллер создаст новый ключ, SealedSecret'ы в git не расшифруются"
+fi
 helm template argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
   --namespace argocd --include-crds \
   -f infra/values/argo-cd.yaml \

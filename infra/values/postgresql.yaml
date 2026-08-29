@@ -10,14 +10,12 @@ image:
   repository: bitnamilegacy/postgresql
   tag: 17.6.0-debian-12-r4
 
-# Пользователь/БД приложения. Чарт создаст Secret postgresql с ключами password / postgres-password.
+# Пользователь/БД приложения. Пароли — НЕ здесь: Secret postgresql (ключи password / postgres-password)
+# создаёт Sealed Secrets из secrets/shop/postgresql.yaml; чарт его только читает (existingSecret).
 auth:
+  existingSecret: postgresql
   username: app
-  password: app        # учебное значение; в проде — existingSecret
   database: app
-  # Пароль суперпользователя postgres. Чарт генерирует случайный и "запоминает" через lookup существующего Secret —
-  # но Argo CD рендерит шаблоны без доступа к кластеру (lookup пуст), и пароль менялся бы при каждом sync.
-  postgresPassword: postgres-admin-not-for-prod
 
 architecture: standalone   # один primary без реплик
 

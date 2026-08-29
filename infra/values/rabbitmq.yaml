@@ -9,10 +9,10 @@ image:
 
 auth:
   username: app
-  password: app
-  # Erlang cookie — общий секрет нод кластера RabbitMQ. Чарт генерирует случайный,
-  # но при helm upgrade требует тот же — фиксируем явно.
-  erlangCookie: shop-learning-cookie-not-for-prod
+  # Пароль и Erlang cookie (общий секрет нод кластера RabbitMQ) — из Secret rabbitmq,
+  # который создаёт Sealed Secrets (secrets/shop/rabbitmq.yaml); ключи rabbitmq-password / rabbitmq-erlang-cookie.
+  existingPasswordSecret: rabbitmq
+  existingErlangSecret: rabbitmq
 
 replicaCount: 1
 

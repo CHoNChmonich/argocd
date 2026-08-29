@@ -26,22 +26,11 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
-  # argocd-secret: чарт рендерит его вообще без блока data (пока в values не заданы пароль/вебхуки), а
-  # admin.password / admin.passwordMtime / server.secretkey Argo дописывает в live-объект сам. Проверено:
-  # Argo сравнивает только поля из desired, поэтому и без ignoreDifferences diff пустой и ключи не стираются.
-  # Правило оставлено как страховка на случай, если в values появится configs.secret.* (тогда data рендерится,
-  # и смена пароля через UI/CLI давала бы вечный OutOfSync — см. argo-cd discussion #21185).
-  ignoreDifferences:
-    - kind: Secret
-      name: argocd-secret
-      jsonPointers:
-        - /data/admin.password
-        - /data/admin.passwordMtime
-        - /data/server.secretkey
+  # argocd-secret чарт не рендерит (configs.secret.createSecret: false) — им владеет SealedSecret
+  # (secrets/argocd/argocd-secret.yaml), поэтому ignoreDifferences на него больше не нужен.
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - ServerSideApply=true              # CRD Application/ApplicationSet > 262 КБ (лимит client-side annotation)
-      - RespectIgnoreDifferences=true     # ignoreDifferences учитывать и при sync, не только в diff

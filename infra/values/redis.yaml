@@ -15,7 +15,8 @@ fullnameOverride: redis
 
 auth:
   enabled: true
-  password: app            # Secret redis, ключ redis-password
+  existingSecret: redis                 # Sealed Secrets: secrets/shop/redis.yaml
+  existingSecretPasswordKey: redis-password
 
 master:
   service:

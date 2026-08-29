@@ -4,4 +4,7 @@ __pycache__/
 .venv/
 .env
 dist/
-infra/charts/   # чарты скачиваются infra/vendor.sh только для чтения; деплой идёт из registry (gitops/)
+# бэкап ключа Sealed Secrets — никогда в git
+cluster/secrets/
+# чарты скачиваются infra/vendor.sh только для чтения; деплой идёт из registry (gitops/)
+infra/charts/
