@@ -1,0 +1,27 @@
+# Метрики Felix (calico-node): дропы по политикам, число endpoint. Порт задан в infra/values/calico.yaml
+# (nodeMetricsPort). Оператор Service для него не создаёт — делаем сами + ServiceMonitor для Prometheus.
+apiVersion: v1
+kind: Service
+metadata:
+  name: calico-node-metrics
+  namespace: calico-system
+  labels: { k8s-app: calico-node }
+spec:
+  selector: { k8s-app: calico-node }
+  clusterIP: None
+  ports:
+    - { name: metrics, port: 9091, targetPort: 9091 }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: calico-node
+  namespace: calico-system
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true   # CRD появится с kube-prometheus-stack (wave 1)
+spec:
+  selector:
+    matchLabels: { k8s-app: calico-node }
+  endpoints:
+    - port: metrics
+      interval: 30s

@@ -1,0 +1,13 @@
+# VPA: admission-controller вызывает apiserver (8000), метрики читает Prometheus; исходящее — apiserver (глобально).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vpa
+  namespace: vpa
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ port: 8000 }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }]
+      ports: [{ port: 8942 }, { port: 8943 }, { port: 8944 }]

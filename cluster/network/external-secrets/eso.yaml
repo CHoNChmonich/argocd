@@ -1,0 +1,18 @@
+# ESO: apiserver вызывает его validating webhook (10250) — источник вне кластера (IP ноды control-plane),
+# поэтому порт открыт без ограничения по источнику: webhook защищён TLS и не хранит ничего ценного.
+# Исходящее: Vault (8200) и apiserver (глобально).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ port: 10250 }]        # webhook <- apiserver
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }]
+      ports: [{ port: 8080 }]         # метрики
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: vault } } }]
+      ports: [{ port: 8200 }]

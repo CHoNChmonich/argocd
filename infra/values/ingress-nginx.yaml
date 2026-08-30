@@ -2,7 +2,12 @@
 #   helm show values ./infra/charts/ingress-nginx)
 controller:
   service:
-    type: LoadBalancer   # Docker Desktop пробросит 80/443 на localhost
+    # kind без облака: LoadBalancer некому реализовать. Фиксированные NodePort'ы, а 80/443 хоста
+    # пробрасываются в них через extraPortMappings в cluster/kind-config.yaml. Прод: LoadBalancer.
+    type: NodePort
+    nodePorts:
+      http: 30080
+      https: 30443
   metrics:
     enabled: true        # /metrics контроллера (:10254)
     serviceMonitor:

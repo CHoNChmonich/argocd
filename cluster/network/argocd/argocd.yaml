@@ -1,0 +1,19 @@
+# Argo CD: внутри namespace компоненты общаются свободно (server/repo-server/controller/redis/dex);
+# снаружи — только ingress-nginx к UI/API и Prometheus к метрикам. Исходящее не ограничено: git, helm-репозитории,
+# OCI-registry, apiserver — Argo по определению ходит в интернет.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: {} }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
+      ports: [{ port: 8080 }, { port: 5556 }]   # argocd-server, dex
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }]
+      ports: [{ port: 8082 }, { port: 8083 }, { port: 8084 }, { port: 5558 }, { port: 9001 }]
+  egress:
+    - {}

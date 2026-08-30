@@ -1,0 +1,16 @@
+# Точка входа. Входящее — отовсюду (NodePort: kube-proxy делает SNAT, источник = IP ноды; плюс admission
+# webhook от apiserver). Исходящее — во все namespace, где есть Ingress-объекты (shop, argocd, monitoring,
+# vault, calico-system/whisker). Перечислять бэкенды здесь — дублировать Ingress-объекты; ограничение
+# ставится на стороне получателя: каждый namespace сам решает, пускать ли ingress-nginx.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - {}
+  egress:
+    - {}

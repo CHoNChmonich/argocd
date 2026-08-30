@@ -1,0 +1,17 @@
+# Доступ к kube-apiserver — только платформенным компонентам (контроллеры, операторы, Prometheus).
+# Приложению shop apiserver не нужен: скомпрометированный под не сможет читать Secret'ы через API.
+# Политика применяется ПОСЛЕ DNAT kube-proxy: Service 10.96.0.1:443 уже превращён в <ip ноды>:6443.
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-apiserver
+spec:
+  order: 110
+  namespaceSelector: kubernetes.io/metadata.name in {"argocd", "monitoring", "ingress-nginx", "vault", "external-secrets", "vpa"}
+  selector: all()
+  types: [Egress]
+  egress:
+    - action: Allow
+      protocol: TCP
+      destination:
+        ports: [6443]

@@ -1,0 +1,38 @@
+# Calico (CNI + NetworkPolicy) через оператор Tigera. Wave -6: раньше всего — без CNI ни один под не получит сеть.
+# Первый раз ставится в cluster/bootstrap.sh (helm template | kubectl apply, как и сам Argo CD) — иначе поды Argo
+# не запустятся; дальше этими объектами владеет это Application (та же схема, что 00-argo-cd.yaml).
+# Values: infra/values/calico.yaml. Политики: cluster/network/ (Application network, 01-network.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: calico
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+  # без finalizer: удаление Application не должно снести сеть кластера
+spec:
+  project: platform
+  sources:
+    - repoURL: https://docs.tigera.io/calico/charts
+      chart: tigera-operator
+      targetRevision: v3.32.1
+      helm:
+        releaseName: calico
+        valueFiles:
+          - $values/infra/values/calico.yaml
+    - repoURL: https://github.com/CHoNChmonich/argocd.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tigera-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:                          # CR Installation/Goldmane/Whisker принимаются только после того,
+      limit: 5                      # как init-контейнер оператора создал CRD (-bootstrap-crds)
+      backoff: { duration: 10s, factor: 2, maxDuration: 2m }

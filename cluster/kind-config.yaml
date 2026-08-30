@@ -1,0 +1,32 @@
+# Декларативное описание локального кластера (kind CLI, не провизионер Docker Desktop:
+# у него нет настроек CNI, и он пересоздаёт кластер при каждом перезапуске Docker).
+#
+#   kind create cluster --config cluster/kind-config.yaml      # или cluster/kind-up.sh
+#
+# Изменение этого файла = пересоздание кластера (kind не умеет применять изменения "на живую").
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: shop
+
+networking:
+  # kindnet (CNI по умолчанию) не умеет NetworkPolicy: объекты принимаются, но никем не исполняются.
+  # Без CNI ноды остаются NotReady, поды — Pending, пока bootstrap.sh не поставит Calico.
+  disableDefaultCNI: true
+  podSubnet: 10.244.0.0/16        # тот же CIDR — в infra/values/calico.yaml (ipPools)
+  serviceSubnet: 10.96.0.0/16
+
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
+    # В kind нет облачного LoadBalancer: 80/443 хоста пробрасываются в NodePort'ы ingress-nginx
+    # (infra/values/ingress-nginx.yaml: nodePorts 30080/30443). NodePort слушает каждая нода,
+    # kube-proxy доставит до любой реплики контроллера, поэтому достаточно одной ноды.
+    extraPortMappings:
+      - { containerPort: 30080, hostPort: 80,  listenAddress: 127.0.0.1, protocol: TCP }
+      - { containerPort: 30443, hostPort: 443, listenAddress: 127.0.0.1, protocol: TCP }
+    # Здесь же в будущем: kubeadmConfigPatches -> apiServer.extraArgs (oidc-issuer-url, oidc-client-id)
+    # для входа людей через Dex и k8s RBAC.
+  - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
+  - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d

@@ -1,0 +1,29 @@
+# Сервисы приложения (orders, inventory, notifier): метка app.kubernetes.io/part-of: shop ставит чарт shop.
+# Входящее: ingress-nginx, друг от друга (orders -> inventory), Prometheus (/metrics). Исходящее: только БД,
+# брокер, кэш, Jaeger и друг к другу. Интернета и apiserver у приложения нет.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shop-apps
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/part-of: shop }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+        - podSelector: { matchLabels: { app.kubernetes.io/part-of: shop } }
+      ports: [{ port: 8000 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/part-of: shop } } }]
+      ports: [{ port: 8000 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: postgresql } } }]
+      ports: [{ port: 5432 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: redis } } }]
+      ports: [{ port: 6379 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: rabbitmq } } }]
+      ports: [{ port: 5672 }]
+    - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: jaeger } } }]
+      ports: [{ port: 4317 }, { port: 4318 }]

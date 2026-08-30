@@ -1,0 +1,16 @@
+# Whisker — UI flow-логов Calico (Goldmane): каждое соединение, allow/deny и какой политикой. Замена Hubble.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whisker
+  namespace: calico-system
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: whisker.shop.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: whisker, port: { number: 8081 } }

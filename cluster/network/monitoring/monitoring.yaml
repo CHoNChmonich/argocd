@@ -1,0 +1,17 @@
+# Prometheus/Alertmanager/Grafana/Loki/Alloy: внутри namespace свободно, снаружи — ingress-nginx к UI.
+# Исходящее не ограничено: Prometheus опрашивает все namespace и ноды, Alloy читает kubelet, Grafana ходит в Loki.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: {} }]
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
+      ports: [{ port: 3000 }, { port: 9090 }, { port: 9093 }]   # grafana, prometheus, alertmanager
+    - ports: [{ port: 10250 }]        # prometheus-operator admission webhook <- apiserver
+  egress:
+    - {}

@@ -1,0 +1,11 @@
+# Всё, что не разрешено явно, — запрещено: и входящее, и исходящее, во всех прикладных namespace.
+# Kubelet-пробы (liveness/readiness) идут с IP собственной ноды — Calico пропускает их всегда.
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  order: 10000                          # самый последний: сначала все allow-политики
+  namespaceSelector: kubernetes.io/metadata.name not in {"kube-system", "calico-system", "calico-apiserver", "tigera-operator", "local-path-storage"}
+  selector: all()
+  types: [Ingress, Egress]

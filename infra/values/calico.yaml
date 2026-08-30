@@ -1,0 +1,33 @@
+# projectcalico/tigera-operator v3.32.1 (Calico v3.32). Полный список: helm show values projectcalico/tigera-operator
+#
+# Чарт ставит только оператор Tigera; сам Calico (calico-node DaemonSet, typha, kube-controllers, CNI-конфиг на
+# нодах) оператор разворачивает по CR Installation, который чарт рендерит из блока installation:.
+# CRD чарт не содержит: их создаёт init-контейнер оператора (-bootstrap-crds), поэтому при первом
+# kubectl apply CR Installation отклоняется ("no matches for kind") — bootstrap.sh применяет чарт повторно,
+# когда оператор поднялся; Argo CD в работе просто повторяет sync (retry).
+installation:
+  kubeletVolumePluginPath: "None"   # CSI-драйвер Calico не нужен (только для его же policy-sync)
+  calicoNetwork:
+    # kind: ноды — docker-контейнеры в одной L2-сети; VXLAN не требует BGP и IPIP-модуля ядра (WSL2).
+    bgp: Disabled
+    linuxDataplane: Iptables
+    ipPools:
+      - cidr: 10.244.0.0/16         # = networking.podSubnet в cluster/kind-config.yaml
+        encapsulation: VXLAN
+        natOutgoing: Enabled        # поды выходят наружу через IP ноды (как kindnet)
+        blockSize: 26               # /26 на ноду за раз (64 IP), при исчерпании нода берёт следующий блок
+        nodeSelector: all()
+  nodeMetricsPort: 9091             # felix /metrics (calico-node) -> cluster/network/calico/metrics.yaml
+  typhaMetricsPort: 9093
+  controlPlaneReplicas: 1           # typha; прод: 2+ на разных нодах (тут одна нода-воркер могла бы уйти на drain)
+
+apiServer:
+  enabled: true                     # projectcalico.org/v3: GlobalNetworkPolicy и др. через kubectl с валидацией
+goldmane:
+  enabled: true                     # агрегатор flow-логов (кто -> кому, allow/deny, по какой политике)
+whisker:
+  enabled: true                     # веб-UI flow-логов: http://whisker.shop.localtest.me (cluster/network/calico/)
+
+resources:
+  requests: { cpu: 20m, memory: 64Mi }
+  limits: { memory: 256Mi }
