@@ -11,7 +11,9 @@
   разрешено в каждом namespace. Всё, что не перечислено, режет default-deny.
 
 Системные namespace (kube-system, calico-system, calico-apiserver, tigera-operator, local-path-storage)
-из default-deny исключены: CoreDNS, kube-proxy, metrics-server, сам Calico.
+исключены из ВСЕХ глобальных политик: CoreDNS, kube-proxy, metrics-server, сам Calico. Не только из deny —
+в Calico под, к которому применена хоть одна политика в направлении Egress, теряет весь egress, кроме
+явно разрешённого; allow-dns на all() оставила бы metrics-server без apiserver.
 
 Проверка: UI Whisker http://whisker.shop.localtest.me (flow-логи allow/deny с именем политики), либо
 `kubectl -n shop exec deploy/orders -- python -c "import socket;socket.create_connection(('vault.vault',8200),3)"` -> timeout.

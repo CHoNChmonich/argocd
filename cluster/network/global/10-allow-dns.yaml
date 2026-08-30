@@ -5,6 +5,9 @@ metadata:
   name: allow-dns
 spec:
   order: 100
+  # Тот же список исключений, что в default-deny. Нюанс Calico: если к поду применена ХОТЬ ОДНА политика на Egress,
+  # весь не разрешённый явно egress запрещён. selector: all() без исключений оставил бы kube-system только DNS.
+  namespaceSelector: kubernetes.io/metadata.name not in {"kube-system", "calico-system", "calico-apiserver", "tigera-operator", "local-path-storage"}
   selector: all()
   types: [Egress]
   egress:
