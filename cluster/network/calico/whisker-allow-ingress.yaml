@@ -1,0 +1,21 @@
+# Оператор Tigera защищает свои компоненты собственными политиками в tier calico-system (проверяется раньше tier
+# default, куда попадают k8s NetworkPolicy). Его политика calico-system.whisker — Ingress без правил = вход запрещён
+# (UI задуман под kubectl port-forward). Tier закрывает пакет на своём конце, поэтому разрешение должно лежать
+# в том же tier и с меньшим order. Имя политики в tier обязано начинаться с "<tier>.".
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: calico-system.whisker-from-ingress
+  namespace: calico-system
+spec:
+  tier: calico-system
+  order: 1
+  selector: k8s-app == 'whisker'
+  types: [Ingress]
+  ingress:
+    - action: Allow
+      protocol: TCP
+      source:
+        namespaceSelector: kubernetes.io/metadata.name == 'ingress-nginx'
+      destination:
+        ports: [8081]
