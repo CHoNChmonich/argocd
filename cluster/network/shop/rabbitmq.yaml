@@ -13,4 +13,4 @@ spec:
     - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
       ports: [{ port: 15672 }]        # management UI (rabbitmq.shop.localtest.me)
     - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }]
-      ports: [{ port: 15692 }]        # rabbitmq_prometheus
+      ports: [{ port: 9419 }]         # rabbitmq_prometheus (bitnami: metrics на 9419)

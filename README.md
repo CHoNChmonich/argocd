@@ -487,6 +487,18 @@ apiserver Calico (`projectcalico.org/v3` с валидацией), Goldmane + Wh
 VPA 8000, prometheus-operator 10250) открыты без источника — apiserver вне сети подов (IP ноды). Политики — в проекте
 `platform`, проекту `shop` NetworkPolicy запрещены (`namespaceResourceBlacklist`): приложение не может открыть себе Vault.
 
+Whisker сам защищён политикой оператора в tier `calico-system` (Ingress без правил — рассчитан на port-forward); tier
+закрывает пакет на своём конце, поэтому разрешение для ingress-nginx лежит в том же tier с меньшим order
+(`cluster/network/calico/whisker-allow-ingress.yaml`). Bitnami-чарты (postgresql/redis/rabbitmq) рендерят свои
+NetworkPolicy с теми же именами — выключены в values (`networkPolicy.enabled: false`), источник один — платформа.
+
+Что поймали: (1) `allow-dns` с `selector: all()` без исключений оставила kube-system только DNS — metrics-server не дошёл
+до apiserver: в Calico любая применённая к поду egress-политика запрещает весь остальной egress; (2) bootstrap с нуля
+при `createSecret: false`: argocd-server не стартует без `argocd-secret`, а ESO ставит сам Argo — bootstrap.sh создаёт
+пустой placeholder, ESO потом берёт его во владение; (3) `vault-init.sh` ждал фазу Running, а не запущенный контейнер;
+readiness Vault (`vault status`) красная, пока sealed — ждать Ready нельзя; после unseal ESO-стор нужно подтолкнуть
+аннотацией `external-secrets.io/force-sync`.
+
 Проверка после включения: 19/19 Application Synced/Healthy, e2e-заказ проходит, из пода orders `vault.vault:8200` и
 `api.github.com:443` — timeout, Whisker показывает deny с политикой `default-deny`.
 
