@@ -38,3 +38,8 @@ metrics:
     tag: 1.76.0-debian-12-r0
   serviceMonitor:
     enabled: true
+
+# NetworkPolicy чарта выключена: сетевые границы задаёт платформа в cluster/network/shop/ (одна точка истины,
+# приложению NetworkPolicy запрещены AppProject). Дефолтная политика чарта к тому же пускает всех (allowExternal).
+networkPolicy:
+  enabled: false

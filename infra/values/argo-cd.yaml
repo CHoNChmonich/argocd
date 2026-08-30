@@ -36,7 +36,7 @@ configs:
     server.insecure: true
 
   # argocd-secret (admin.password bcrypt, server.secretkey для JWT, webhook.github.secret, позже dex.github.clientSecret)
-  # чарт НЕ создаёт — его даёт Sealed Secrets из secrets/argocd/argocd-secret.yaml. Argo дописывает туда ключи
+  # чарт НЕ создаёт — его синхронизирует ESO из Vault (secrets/argocd/argocd-secret.yaml). Argo дописывает туда ключи
   # только если их нет, поэтому пароль admin задаётся из git, а не генерируется при старте.
   secret:
     createSecret: false

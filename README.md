@@ -69,7 +69,8 @@ services/            приложение: common/, orders/, inventory/, notifie
 charts/shop/         Helm-чарт приложения (этап 3)
 gitops/              Argo CD: bootstrap/root.yaml (app of apps), platform/*.yaml, apps/shop.yaml (этап 4)
 infra/values/        наши values к внешним чартам (сами чарты Argo берёт из репозиториев по версии)
-cluster/             registry.sh, bootstrap.sh (Argo CD + root), namespaces/ (Namespace с Pod Security)
+cluster/             kind-config.yaml + kind-up.sh (кластер), registry.sh, bootstrap.sh (Calico + Argo CD + root),
+                     namespaces/ (Namespace с Pod Security), network/ (NetworkPolicy, этап 6), vault-init.sh
 deploy/local/        конфиги для docker-compose (prometheus)
 scripts/             build-images.sh, deploy.sh, load.py
 docker-compose.yaml  локальный стенд без k8s
@@ -77,11 +78,13 @@ docker-compose.yaml  локальный стенд без k8s
 
 ## Этап 2: Kubernetes (сырые манифесты)
 
-Кластер — Docker Desktop с kind-провизионером (1 control-plane + 2 worker, k8s 1.31).
-Helm 3 — только клиент (в кластере ничего не ставится), установлен через `winget install Helm.Helm`.
+Кластер — kind (1 control-plane + 2 worker, k8s 1.34), описан декларативно в `cluster/kind-config.yaml`
+(до этапа 6 — кластер провизионера Docker Desktop: у него нет настроек CNI, и он пересоздаётся при каждом
+перезапуске Docker; Kubernetes в Docker Desktop теперь выключен). `winget install Kubernetes.kind Helm.Helm` —
+оба только клиенты на хосте.
 
 ```bash
-bash cluster/registry.sh         # локальный registry localhost:5001, подключён к нодам kind
+bash cluster/kind-up.sh          # kind create cluster --config cluster/kind-config.yaml + registry.sh
 bash scripts/build-images.sh     # build + push localhost:5001/shop/{orders,inventory,notifier}:dev
 bash scripts/publish-chart.sh    # helm package + push charts/shop -> localhost:5001/charts/shop:<version>
 bash cluster/bootstrap.sh        # helm: только Argo CD + root Application; всё остальное Argo поднимает из git
@@ -119,8 +122,9 @@ helm-репозиторий или OCI-registry). Argo CD тянет его от
 чужие объекты с теми же именами Helm в релиз не примет.
 
 Особенности kind-нод: это контейнеры со своим containerd, образы docker CLI им не видны —
-поэтому registry (как в проде). IP из сети kind (172.20.x.x) с хоста недоступны; LoadBalancer-порты
-Docker Desktop пробрасывает на `localhost`, NodePort — нет.
+поэтому registry (как в проде). IP из сети kind (172.20.x.x) с хоста недоступны, LoadBalancer реализовать
+некому — ingress-nginx на фиксированных NodePort 30080/30443, а `extraPortMappings` в kind-config пробрасывает
+в них 80/443 хоста.
 
 При старте приложения падают, пока RabbitMQ/Postgres не готовы, и k8s их перезапускает (RESTARTS 1-2) —
 это штатно: crash -> restart с backoff, readiness держит под вне трафика до готовности зависимостей.
@@ -452,9 +456,43 @@ Argo принимает `POST /api/webhook` (GitHub/GitLab/Bitbucket/Gitea) и �
 webhook нужен публичный URL: GitHub → Settings → Webhooks → `https://<argo>/api/webhook`, content type json,
 secret = `webhook.github.secret`, событие push. Локально — туннель (cloudflared/ngrok) на `argocd.shop.localtest.me`.
 
+## Этап 6: сеть — Calico и NetworkPolicy (`cluster/kind-config.yaml`, `00-calico.yaml`, `01-network.yaml`, `cluster/network/`)
+
+Проблема: kindnet (CNI по умолчанию в kind) не исполняет NetworkPolicy — объекты создаются, а трафик ходит. Любой
+под мог открыть Postgres, Vault или интернет. Решение — свой CNI. Cilium (eBPF, Hubble) и Calico делают одно и то же
+для стандартных политик; выбран Calico как более простой и предсказуемый на kind под WSL2.
+
+Как ставится. Кластер создан с `disableDefaultCNI: true` — ноды NotReady, пока нет CNI, поэтому Calico идёт первым
+шагом `bootstrap.sh`, той же схемой, что Argo: `helm template projectcalico/tigera-operator --no-hooks | kubectl apply`
+(`--no-hooks`: в чарте Job с hook `pre-delete` — деинсталляция, kubectl запустил бы его как обычный ресурс). Чарт ставит
+только оператор Tigera; CRD оператор создаёт сам при старте, поэтому CR `Installation`/`Goldmane`/`Whisker` применяются
+вторым проходом (Argo — `retry`). Дальше всем владеет Application `calico` (wave -6). Values `infra/values/calico.yaml`:
+пул 10.244.0.0/16 = `podSubnet` kind, VXLAN без BGP (ноды — контейнеры в одной L2-сети, IPIP-модуль в WSL2 не нужен),
+apiserver Calico (`projectcalico.org/v3` с валидацией), Goldmane + Whisker — flow-логи и UI http://whisker.shop.localtest.me:
+каждое соединение, allow/deny и имя политики (то, что у Cilium делает Hubble).
+
+Политики — `cluster/network/`, Application `network` (wave -1, после namespaces). Два уровня:
+- `global/` — Calico `GlobalNetworkPolicy`, кластерные: `default-deny` (Ingress+Egress для всех прикладных namespace,
+  order 10000 — проверяется последним), `allow-dns` (всем — к CoreDNS:53), `allow-apiserver` (к :6443 — только argocd,
+  monitoring, ingress-nginx, vault, external-secrets, vpa; приложению apiserver не нужен). Системные namespace
+  (kube-system, calico-*, tigera-operator, local-path-storage) из deny исключены.
+- `<ns>/` — стандартные `NetworkPolicy` (order 1000, переносимы на любой CNI): что разрешено. shop — по сервисам:
+  приложения (`part-of: shop`) принимают 8000 от ingress-nginx/друг друга/Prometheus, ходят только в postgresql:5432,
+  redis:6379, rabbitmq:5672, jaeger:4317/4318 и друг к другу; БД принимают только от приложений и exporter-порты от
+  monitoring; Vault — 8200 от ESO/ingress/monitoring и ничего наружу; ESO — webhook от apiserver и egress только в Vault;
+  argocd/monitoring — свободно внутри namespace, снаружи только ingress-nginx и Prometheus, egress не ограничен (git,
+  helm-репозитории, scrape всего кластера); ingress-nginx — вход отовсюду, выход везде (ограничение — на стороне получателя).
+
+Семантика: правило первого совпадения по order; kubelet-пробы Calico пропускает всегда; webhook-порты (ESO 10250,
+VPA 8000, prometheus-operator 10250) открыты без источника — apiserver вне сети подов (IP ноды). Политики — в проекте
+`platform`, проекту `shop` NetworkPolicy запрещены (`namespaceResourceBlacklist`): приложение не может открыть себе Vault.
+
+Проверка после включения: 19/19 Application Synced/Healthy, e2e-заказ проходит, из пода orders `vault.vault:8200` и
+`api.github.com:443` — timeout, Whisker показывает deny с политикой `default-deny`.
+
 ## Дальше
 
-1. NetworkPolicy, ResourceQuota/LimitRange, Job/CronJob (миграции как helm hook).
+1. ResourceQuota/LimitRange, Job/CronJob (миграции как helm hook).
 2. RBAC для людей (k8s), cert-manager + TLS. Argo: SSO через Dex/GitHub (+ отключить admin), ApplicationSet/окружения
    (см. заметки в чате: envs/ папками, git files generator), notifications, Rollouts.
 3. HPA по метрикам Prometheus (prometheus-adapter) и KEDA для notifier по длине очереди.

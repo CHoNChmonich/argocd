@@ -36,3 +36,9 @@ spec:
     retry:                          # CR Installation/Goldmane/Whisker принимаются только после того,
       limit: 5                      # как init-контейнер оператора создал CRD (-bootstrap-crds)
       backoff: { duration: 10s, factor: 2, maxDuration: 2m }
+  ignoreDifferences:
+    # Оператор дописывает в Installation.spec вычисленные значения по умолчанию (cni, variant, hostPorts, поля ipPools...)
+    # под своим field manager "operator". Не сравнивать поля, которыми владеет он, — иначе вечный OutOfSync.
+    - group: operator.tigera.io
+      kind: Installation
+      managedFieldsManagers: [operator]

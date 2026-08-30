@@ -25,6 +25,8 @@ architecture: standalone   # один primary без реплик
 fullnameOverride: postgresql
 
 primary:
+  networkPolicy:
+    enabled: false   # см. cluster/network/shop/postgresql.yaml
   service:
     type: ClusterIP
     ports:

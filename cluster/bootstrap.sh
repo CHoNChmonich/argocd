@@ -35,6 +35,10 @@ echo ">> 1. argo-cd $ARGOCD_CHART_VERSION (helm template | kubectl apply)"
 helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm repo update argo >/dev/null
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+# argocd-secret чарт не создаёт (configs.secret.createSecret: false) — его наполняет ESO из Vault. Но ESO ставит сам Argo,
+# а argocd-server без этого Secret не стартует. Пустой placeholder разрывает круг: Argo допишет в него server.secretkey,
+# ESO (creationPolicy Owner) позже возьмёт Secret во владение и положит admin.password и остальное из Vault.
+kubectl -n argocd get secret argocd-secret >/dev/null 2>&1 || kubectl -n argocd create secret generic argocd-secret
 
 helm template argo-cd argo/argo-cd --version "$ARGOCD_CHART_VERSION" \
   --namespace argocd --include-crds \

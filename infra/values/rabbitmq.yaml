@@ -43,3 +43,8 @@ metrics:
 # Per-object метрики нужны для алертов/дашбордов по конкретной очереди и для KEDA.
 extraConfiguration: |-
   prometheus.return_per_object_metrics = true
+
+# NetworkPolicy чарта выключена: сетевые границы задаёт платформа в cluster/network/shop/ (одна точка истины,
+# приложению NetworkPolicy запрещены AppProject). Дефолтная политика чарта к тому же пускает всех (allowExternal).
+networkPolicy:
+  enabled: false

@@ -16,13 +16,16 @@ v() { kubectl -n "$NS" exec -i "$POD" -- sh -c "VAULT_TOKEN=\${VAULT_TOKEN:-} $*
 status() { v vault status -format=json 2>/dev/null || true; }
 
 echo ">> жду под $POD"
-for i in $(seq 1 60); do kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running && break; sleep 5; done
+# Ждём запущенный контейнер, не Ready: readiness-проба чарта — vault status, для sealed/uninit она красная.
+for i in $(seq 1 90); do [ "$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.containerStatuses[0].started}' 2>/dev/null)" = true ] && break; sleep 5; done
 
 # ---- init / unseal
 if ! grep -q '"initialized": *true' <<<"$(status)"; then
   echo ">> init (1 unseal-ключ из 1 — лаба; прод: 5 из 3 или KMS auto-unseal)"
   mkdir -p cluster/secrets
-  v vault operator init -key-shares=1 -key-threshold=1 -format=json > "$INIT"
+  v vault operator init -key-shares=1 -key-threshold=1 -format=json > "$INIT.tmp"
+  python -c "import json;json.load(open('$INIT.tmp'))['root_token']" || { rm -f "$INIT.tmp"; echo "!! init не удался"; exit 1; }
+  mv "$INIT.tmp" "$INIT"
 fi
 [ -f "$INIT" ] || { echo "!! $INIT не найден: Vault инициализирован, но ключа нет — восстановить нельзя"; exit 1; }
 UNSEAL=$(python -c "import json,sys;print(json.load(open('$INIT'))['unseal_keys_b64'][0])")
@@ -82,4 +85,9 @@ if ! vt vault kv get -format=json secret/argocd/argocd-secret >/dev/null 2>&1; t
     server.secretkey="$(gen)" webhook.github.secret="$(gen)"
   echo ">> admin-пароль Argo CD (UI: http://argocd.shop.localtest.me, логин admin): $ADMIN"
 fi
+# ESO проверял Vault, пока тот был sealed, и запомнил ошибку; повторная проверка — по аннотации force-sync.
+kubectl annotate clustersecretstore vault external-secrets.io/force-sync="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+for es in $(kubectl get externalsecret -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}'); do
+  kubectl -n "${es%/*}" annotate externalsecret "${es#*/}" external-secrets.io/force-sync="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+done
 echo ">> Vault UI: http://vault.shop.localtest.me (root token в $INIT — в проде root отзывают после настройки)"
